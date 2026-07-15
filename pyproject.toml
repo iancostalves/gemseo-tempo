@@ -1,0 +1,94 @@
+[project]
+name = "gemseo-tempo"
+authors = [
+    {name = "Ian Costa-Alves", email = "ian.costa-alves@isae-supaero.fr"}
+]
+description = "GEMSEO plugin for multidisciplinary optimization of dynamic systems"
+license = {text = "GNU Lesser General Public License v3"}
+classifiers = [
+    "License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dynamic = ["version"]
+requires-python = ">=3.11, <3.14"
+dependencies = [
+    "gemseo-jax >=2.0.2, <3",
+    # diffrax <0.7 is incompatible with jax >=0.4.36 (jax.core.ConcreteArray
+    # was removed); 0.7+ is the validated series.
+    "diffrax >=0.7",
+    "equinox",
+    "pint >=0.24",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+test = [
+    # Coverage is run via `coverage run -m pytest`: pytest-cov's in-process
+    # coverage startup breaks the jaxlib MLIR extension import (its
+    # sys.modules submodule registration fails under the early tracer).
+    "coverage",
+    "covdefaults",
+    "pytest",
+    "pytest-xdist",
+]
+doc = [
+    "sphinx >=7",
+    "myst-parser",
+    "sphinx-design",
+    "sphinx-gallery",
+    "furo",
+]
+benchmark = [
+    "gemseo-benchmark",
+]
+calibration = [
+    "gemseo-calibration",
+]
+uq = [
+    "gemseo-umdo",
+    "openturns",
+]
+
+[project.urls]
+Source = "https://github.com/iancostalves/gemseo-tempo"
+Tracker = "https://github.com/iancostalves/gemseo-tempo/issues"
+
+[project.readme]
+file = "README.md"
+content-type = "text/markdown"
+
+[project.entry-points]
+gemseo_plugins = { gemseo-tempo = "gemseo_tempo" }
+
+[build-system]
+requires = [
+    "setuptools",
+    "setuptools_scm[toml]",
+]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+
+[tool.setuptools]
+license-files = [
+    "LICENSE.txt",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.coverage.run]
+plugins = ["covdefaults"]
+source = ["gemseo_tempo"]
+
+[tool.coverage.report]
+fail_under = 100

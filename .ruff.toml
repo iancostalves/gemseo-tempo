@@ -1,0 +1,35 @@
+fix = true
+line-length = 88
+target-version = "py311"
+src = ["src"]
+
+[lint]
+select = [
+    "B",
+    "D",
+    "E",
+    "F",
+    "I",
+    "UP",
+]
+ignore = [
+    # Missing docstring in magic method.
+    "D105",
+    # Missing argument description in the docstring (handled by review).
+    "D417",
+]
+
+[lint.isort]
+force-single-line = true
+
+[lint.pydocstyle]
+convention = "numpy"
+
+[lint.per-file-ignores]
+"tests/*.py" = ["D"]
+"docs/*.py" = ["D", "E501"]
+"noxfile.py" = ["D"]
+
+[format]
+docstring-code-format = true
+docstring-code-line-length = 75

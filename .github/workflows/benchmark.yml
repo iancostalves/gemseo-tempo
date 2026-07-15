@@ -1,0 +1,21 @@
+name: benchmark
+
+# Manually triggered benchmarking workflow. Stub until Sprint 10 wires
+# gemseo-benchmark problem groups and report generation.
+on:
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install with benchmark extras
+        run: pip install -e ".[benchmark]"
+      - name: Run benchmarks (stub)
+        run: echo "Filled in Sprint 10 - benchmarks/run.py"
