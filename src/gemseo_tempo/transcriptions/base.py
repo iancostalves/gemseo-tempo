@@ -50,6 +50,9 @@ CONSTANT_PREFIX = "constant."
 INITIAL_PREFIX = "initial."
 """The grammar prefix of free initial-state components."""
 
+STATE_PREFIX = "state."
+"""The grammar prefix of state-node design variables (collocation)."""
+
 TRAJECTORY_PREFIX = "trajectory."
 """The grammar prefix of timeseries on the save grid."""
 
@@ -65,7 +68,7 @@ T_FINAL = "t_f"
 
 @dataclass
 class BoundarySpec:
-    """Per-state boundary flags, dymos-inspired.
+    """Per-state boundary flags.
 
     A state with ``fix_initial=False`` has its initial value promoted to
     a design variable (defaulting to ``s0``); a state with
@@ -205,6 +208,37 @@ class TranscribedProblem:
 
     outputs: StagePiece | None = None
     """The outputs stage of the split assembly, when supported."""
+
+    guess_setter: Callable | None = None
+    """A callback set by transcriptions that support warm starts; it
+    updates the design-variable defaults from a :class:`.Trajectory`."""
+
+    def set_initial_guess(self, trajectory) -> None:
+        """Seed the design-variable defaults from a trajectory.
+
+        Interpolates the states and controls of a :class:`.Trajectory`
+        (from a cheap shooting run or a coarse solve) onto the transcription
+        grid and writes them into :attr:`input_defaults` and the
+        design-variable specs, so the next scenario build starts warm.
+
+        Parameters
+        ----------
+        trajectory
+            The trajectory to interpolate onto the grid.
+
+        Raises
+        ------
+        NotImplementedError
+            If the transcription does not support warm starts (e.g. single
+            shooting, whose design variables are control parameters, not
+            node values).
+        """
+        if self.guess_setter is None:
+            raise NotImplementedError(
+                "This transcription does not support set_initial_guess;"
+                " it has no node grid to interpolate onto."
+            )
+        self.guess_setter(trajectory)
 
 
 class AbstractTranscription:
