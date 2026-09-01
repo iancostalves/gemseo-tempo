@@ -122,7 +122,7 @@ class Trajectory:
     """A simulated trajectory on the save grid.
 
     Any declared state, control, or output is available on the save grid
-    regardless of the transcription (the dymos timeseries concept).
+    regardless of the transcription, giving a uniform timeseries view.
     """
 
     ts: Array

@@ -207,8 +207,8 @@ class DelayedControl(AbstractControl):
 
     The wrapped control provides the input signal; the delayed value is
     the last stage of a chain of ``order`` first-order lags of time
-    constant ``time_constant / order`` each (an Erlang filter, the ISDC
-    paper approach). The stage values are dynamic states: the integrators
+    constant ``time_constant / order`` each (an Erlang, or gamma, delay
+    filter). The stage values are dynamic states: the integrators
     append them to the global flattened state automatically, and the
     state-space RHS receives the delayed value under this control's name.
     """
