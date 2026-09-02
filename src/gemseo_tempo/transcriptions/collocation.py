@@ -49,6 +49,7 @@ from gemseo_tempo.transcriptions.base import TRAJECTORY_PREFIX
 from gemseo_tempo.transcriptions.base import AbstractTranscription
 from gemseo_tempo.transcriptions.base import TranscribedProblem
 from gemseo_tempo.transcriptions.base import VariableSpec
+from gemseo_tempo.transcriptions.base import resolve_parameter_sources
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -187,7 +188,7 @@ class HermiteSimpson(AbstractTranscription):
             set(statics.chain.output_grammar.names) if statics else set()
         )
         statics_input_names = list(statics.chain.input_grammar.names) if statics else []
-        theta_inputs = self._parameter_sources(
+        theta_inputs = resolve_parameter_sources(
             state_space, statics_output_names, constants
         )
 
@@ -433,42 +434,6 @@ class HermiteSimpson(AbstractTranscription):
                     f"TimeIntegral {functional.name!r} references"
                     f" {functional.output_name!r}, which is not an output."
                 )
-
-    @staticmethod
-    def _parameter_sources(state_space, statics_output_names, constants):
-        """Map each dynamics parameter to its input name.
-
-        Parameters
-        ----------
-        state_space
-            The dynamics model.
-        statics_output_names
-            The names produced by the statics chain.
-        constants
-            The declared constant values.
-
-        Returns
-        -------
-        dict
-            The input name of each parameter.
-
-        Raises
-        ------
-        ValueError
-            If a parameter has no source.
-        """
-        theta_inputs = {}
-        for parameter in state_space.parameters:
-            if parameter in statics_output_names:
-                theta_inputs[parameter] = parameter
-            elif parameter in constants:
-                theta_inputs[parameter] = CONSTANT_PREFIX + parameter
-            else:
-                raise ValueError(
-                    f"Parameter {parameter!r} is neither an output of the"
-                    " statics chain nor given in constants."
-                )
-        return theta_inputs
 
     def _add_functionals(
         self,

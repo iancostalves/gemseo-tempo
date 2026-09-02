@@ -22,12 +22,14 @@ from gemseo_tempo.transcriptions.base import StagePiece
 from gemseo_tempo.transcriptions.base import TranscribedProblem
 from gemseo_tempo.transcriptions.base import VariableSpec
 from gemseo_tempo.transcriptions.collocation import HermiteSimpson
+from gemseo_tempo.transcriptions.indirect import IndirectShooting
 from gemseo_tempo.transcriptions.single_shooting import SingleShooting
 
 __all__ = [
     "AbstractTranscription",
     "BoundarySpec",
     "HermiteSimpson",
+    "IndirectShooting",
     "SingleShooting",
     "StagePiece",
     "TranscribedProblem",

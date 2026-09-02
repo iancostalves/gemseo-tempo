@@ -53,6 +53,9 @@ INITIAL_PREFIX = "initial."
 STATE_PREFIX = "state."
 """The grammar prefix of state-node design variables (collocation)."""
 
+COSTATE_PREFIX = "costate."
+"""The grammar prefix of initial-costate design variables (indirect)."""
+
 TRAJECTORY_PREFIX = "trajectory."
 """The grammar prefix of timeseries on the save grid."""
 
@@ -295,3 +298,47 @@ class AbstractTranscription:
             Always; subclasses implement the transcription.
         """
         raise NotImplementedError
+
+
+def resolve_parameter_sources(
+    state_space: StateSpace,
+    statics_output_names: set[str],
+    constants: Mapping[str, float],
+) -> dict[str, str]:
+    """Map each dynamics parameter to the input name that supplies it.
+
+    A parameter is produced either by the statics chain (used under its
+    own name) or declared as a constant (used under the ``constant.``
+    prefix).
+
+    Parameters
+    ----------
+    state_space
+        The dynamics model.
+    statics_output_names
+        The names produced by the statics chain.
+    constants
+        The declared constant values.
+
+    Returns
+    -------
+    dict
+        The input name of each parameter, keyed by parameter name.
+
+    Raises
+    ------
+    ValueError
+        If a parameter has neither source.
+    """
+    theta_inputs = {}
+    for parameter in state_space.parameters:
+        if parameter in statics_output_names:
+            theta_inputs[parameter] = parameter
+        elif parameter in constants:
+            theta_inputs[parameter] = CONSTANT_PREFIX + parameter
+        else:
+            raise ValueError(
+                f"Parameter {parameter!r} is neither an output of the"
+                " statics chain nor given in constants."
+            )
+    return theta_inputs
