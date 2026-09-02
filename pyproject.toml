@@ -46,9 +46,6 @@ doc = [
     "sphinx-gallery",
     "furo",
 ]
-benchmark = [
-    "gemseo-benchmark",
-]
 calibration = [
     "gemseo-calibration",
 ]
