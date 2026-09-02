@@ -23,6 +23,7 @@ from gemseo_jax.jax_discipline import JAXDiscipline
 
 from gemseo_tempo.dynamics.integrators import FORWARD
 from gemseo_tempo.dynamics.integrators import REVERSE
+from gemseo_tempo.scenario.structured_discipline import StructuredJAXDiscipline
 from gemseo_tempo.transcriptions.base import CONSTANT_PREFIX
 from gemseo_tempo.transcriptions.single_shooting import SingleShooting
 
@@ -163,16 +164,21 @@ class DynamicScenario:
             The discipline, differentiated in the scenario's mode.
         """
         problem = self.problem
-        return JAXDiscipline(
-            function=problem.jax_function,
-            input_names=list(problem.input_defaults),
-            output_names=problem.output_names,
-            default_inputs=problem.input_defaults,
-            differentiation_method=JAXDiscipline.DifferentiationMethod(
+        arguments = {
+            "function": problem.jax_function,
+            "input_names": list(problem.input_defaults),
+            "output_names": problem.output_names,
+            "default_inputs": problem.input_defaults,
+            "differentiation_method": JAXDiscipline.DifferentiationMethod(
                 self.differentiation_method
             ),
-            name="dynamic_scenario",
-        )
+            "name": "dynamic_scenario",
+        }
+        if problem.jacobian is not None:
+            return StructuredJAXDiscipline(
+                structured_jacobian=problem.jacobian, **arguments
+            )
+        return JAXDiscipline(**arguments)
 
     def _build_split(self) -> list[JAXDiscipline]:
         """Build the statics, dynamics, and outputs disciplines.

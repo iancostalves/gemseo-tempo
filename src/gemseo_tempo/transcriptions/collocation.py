@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING
 
 import jax
 import jax.numpy as jnp
+import numpy
 
 from gemseo_tempo.outputs.constraints import ControlGroupConstraint
 from gemseo_tempo.outputs.constraints import PathConstraint
@@ -47,6 +48,7 @@ from gemseo_tempo.transcriptions.base import T_FINAL
 from gemseo_tempo.transcriptions.base import TIMES
 from gemseo_tempo.transcriptions.base import TRAJECTORY_PREFIX
 from gemseo_tempo.transcriptions.base import AbstractTranscription
+from gemseo_tempo.transcriptions.base import StructuredJacobian
 from gemseo_tempo.transcriptions.base import TranscribedProblem
 from gemseo_tempo.transcriptions.base import VariableSpec
 from gemseo_tempo.transcriptions.base import resolve_parameter_sources
@@ -80,6 +82,13 @@ class HermiteSimpson(AbstractTranscription):
     compressed
         Whether fixed boundary states are removed from the design space
         (they become parameters) rather than kept with an equality.
+    sparse_jacobian
+        Whether to compute the defect Jacobian from per-segment blocks.
+        Segment ``k`` involves only nodes ``k`` and ``k+1``, so one
+        vectorised pass over the segments replaces a dense transform
+        whose cost grows with the square of the grid size. The defect
+        values are unchanged; only their derivative is obtained
+        differently. Off by default.
     """
 
     def __init__(
@@ -87,6 +96,7 @@ class HermiteSimpson(AbstractTranscription):
         num_segments: int,
         defect_ref: dict[str, float] | float = 1.0,
         compressed: bool = True,
+        sparse_jacobian: bool = False,
     ) -> None:
         """Store the discretization settings.
 
@@ -98,10 +108,14 @@ class HermiteSimpson(AbstractTranscription):
             The defect scaling.
         compressed
             Whether fixed boundary states leave the design space.
+        sparse_jacobian
+            Whether to derive the defect Jacobian from per-segment
+            blocks instead of a dense automatic transform.
         """
         self.num_segments = int(num_segments)
         self.defect_ref = defect_ref
         self.compressed = compressed
+        self.sparse_jacobian = sparse_jacobian
 
     def _defect_ref_of(self, name: str) -> float:
         """Return the defect scaling of a state.
@@ -363,6 +377,22 @@ class HermiteSimpson(AbstractTranscription):
             ),
         ]
 
+        structured = None
+        if self.sparse_jacobian:
+            structured = self._build_structured_jacobian(
+                state_space,
+                state_names,
+                control_names,
+                free_indices,
+                boundary,
+                read_theta,
+                full_state,
+                statics,
+                statics_input_names,
+                t0,
+                t1,
+            )
+
         problem = TranscribedProblem(
             design_variables=design_variables,
             jax_function=jax_function,
@@ -370,6 +400,7 @@ class HermiteSimpson(AbstractTranscription):
             constraint_names=constraint_names,
             input_defaults=input_defaults,
             output_names=output_names,
+            jacobian=structured,
         )
         problem.guess_setter = self._make_guess_setter(
             problem,
@@ -598,3 +629,158 @@ class HermiteSimpson(AbstractTranscription):
                 problem.design_variables[CONTROL_PREFIX + name].value = value
 
         return guess_setter
+
+    def _build_structured_jacobian(
+        self,
+        state_space,
+        state_names,
+        control_names,
+        free_indices,
+        boundary,
+        read_theta,
+        full_state,
+        statics,
+        statics_input_names,
+        t0,
+        t1,
+    ):
+        """Build the defect Jacobian from per-segment blocks.
+
+        Segment ``k`` of a Hermite-Simpson defect involves only the nodes
+        ``k`` and ``k+1``, so differentiating one segment and mapping that
+        over the grid produces every nonzero entry in a single vectorised
+        pass. The blocks are then scattered into the columns GEMSEO
+        expects. The cost grows with the number of segments instead of
+        with its square.
+
+        Returns
+        -------
+        StructuredJacobian
+            The defect Jacobian with respect to the node design variables
+            and, when the final time is free, ``t_f``.
+        """
+        n_seg = self.num_segments
+        n_nodes = n_seg + 1
+        segments = numpy.arange(n_seg)
+
+        def segment_defects(s_left, s_right, u_left, u_right, t_left, t_right, theta):
+            """Return the Simpson defects of a single segment."""
+            step = t_right - t_left
+            f_left = state_space.rhs(t_left, s_left, u_left, theta)
+            f_right = state_space.rhs(t_right, s_right, u_right, theta)
+            s_mid = {
+                name: 0.5 * (s_left[name] + s_right[name])
+                + (step / 8.0) * (f_left[name] - f_right[name])
+                for name in state_names
+            }
+            u_mid = {
+                name: 0.5 * (u_left[name] + u_right[name]) for name in control_names
+            }
+            f_mid = state_space.rhs(0.5 * (t_left + t_right), s_mid, u_mid, theta)
+            return {
+                name: (
+                    s_right[name]
+                    - s_left[name]
+                    - (step / 6.0) * (f_left[name] + 4.0 * f_mid[name] + f_right[name])
+                )
+                / self._defect_ref_of(name)
+                for name in state_names
+            }
+
+        block_jacobian = jax.vmap(
+            jax.jacobian(segment_defects, argnums=(0, 1, 2, 3, 4, 5)),
+            in_axes=(0, 0, 0, 0, 0, 0, None),
+        )
+
+        def scatter(left, right, node_to_column, n_columns):
+            """Place the per-segment blocks into their dense columns."""
+            matrix = jnp.zeros((n_seg, n_columns))
+            for offset, values in ((0, left), (1, right)):
+                columns = node_to_column[segments + offset]
+                keep = numpy.nonzero(columns >= 0)[0]
+                if keep.size:
+                    matrix = matrix.at[segments[keep], columns[keep]].add(values[keep])
+            return matrix
+
+        state_columns = {}
+        for name in state_names:
+            lookup = numpy.full(n_nodes, -1, dtype=int)
+            for column, node in enumerate(free_indices[name]):
+                lookup[node] = column
+            state_columns[name] = lookup
+        control_columns = numpy.arange(n_nodes)
+
+        def function(data):
+            """Return the defect Jacobian, scattered into dense columns."""
+            data = dict(data)
+            if statics is not None:
+                data.update(
+                    statics(
+                        {
+                            name: data[CONSTANT_PREFIX + name]
+                            for name in statics_input_names
+                        }
+                    )
+                )
+            theta = read_theta(data)
+            state_nodes = {
+                name: full_state(name, data[STATE_PREFIX + name])
+                for name in state_names
+            }
+            control_nodes = {
+                name: data[CONTROL_PREFIX + name] for name in control_names
+            }
+            if boundary.free_final_time:
+                times = jnp.linspace(0.0, 1.0, n_nodes) * jnp.squeeze(data[T_FINAL])
+            else:
+                times = jnp.linspace(t0, t1, n_nodes)
+
+            blocks = block_jacobian(
+                {name: values[:-1] for name, values in state_nodes.items()},
+                {name: values[1:] for name, values in state_nodes.items()},
+                {name: values[:-1] for name, values in control_nodes.items()},
+                {name: values[1:] for name, values in control_nodes.items()},
+                times[:-1],
+                times[1:],
+                theta,
+            )
+            jacobian = {}
+            for name in state_names:
+                # jax.jacobian puts the output structure outermost, so this
+                # is the tuple of derivatives of one defect with respect to
+                # the six differentiated arguments of the segment function.
+                by_argument = blocks[name]
+                row = {}
+                for other in state_names:
+                    row[STATE_PREFIX + other] = scatter(
+                        by_argument[0][other],
+                        by_argument[1][other],
+                        state_columns[other],
+                        len(free_indices[other]),
+                    )
+                for other in control_names:
+                    row[CONTROL_PREFIX + other] = scatter(
+                        by_argument[2][other],
+                        by_argument[3][other],
+                        control_columns,
+                        n_nodes,
+                    )
+                if boundary.free_final_time:
+                    # times = linspace(0, 1, n_nodes) * t_f, so node k moves
+                    # at rate k / n_seg when the final time changes.
+                    row[T_FINAL] = (
+                        by_argument[4] * (segments / n_seg)
+                        + by_argument[5] * ((segments + 1) / n_seg)
+                    ).reshape(-1, 1)
+                jacobian[DEFECT_PREFIX + name] = row
+            return jacobian
+
+        input_names = [STATE_PREFIX + name for name in state_names]
+        input_names.extend(CONTROL_PREFIX + name for name in control_names)
+        if boundary.free_final_time:
+            input_names.append(T_FINAL)
+        return StructuredJacobian(
+            function=function,
+            output_names=tuple(DEFECT_PREFIX + name for name in state_names),
+            input_names=tuple(input_names),
+        )

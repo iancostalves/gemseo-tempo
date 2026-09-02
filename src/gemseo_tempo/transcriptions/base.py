@@ -183,6 +183,27 @@ class StagePiece:
 
 
 @dataclass
+class StructuredJacobian:
+    """A transcription-supplied Jacobian exploiting known sparsity.
+
+    A transcription that knows the structure of some of its outputs can
+    compute their derivatives far more cheaply than a dense automatic
+    transform. It declares here which outputs and which inputs it covers;
+    the discipline falls back to the dense transform for anything else,
+    so a transcription only has to describe the part it knows is sparse.
+    """
+
+    function: Callable
+    """The map from the input dict to ``{output: {input: array}}``."""
+
+    output_names: tuple[str, ...]
+    """The outputs whose derivatives this function provides."""
+
+    input_names: tuple[str, ...]
+    """The inputs with respect to which it differentiates them."""
+
+
+@dataclass
 class TranscribedProblem:
     """The finite-dimensional problem seen by the optimizer."""
 
@@ -211,6 +232,10 @@ class TranscribedProblem:
 
     outputs: StagePiece | None = None
     """The outputs stage of the split assembly, when supported."""
+
+    jacobian: StructuredJacobian | None = None
+    """A structure-aware Jacobian for part of the outputs, when the
+    transcription can beat the dense automatic transform."""
 
     guess_setter: Callable | None = None
     """A callback set by transcriptions that support warm starts; it
