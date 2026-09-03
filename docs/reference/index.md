@@ -86,6 +86,10 @@ object is documented once, under the module that defines it.
    gemseo_tempo.problems.brachistochrone.model
    gemseo_tempo.problems.brachistochrone.problem
    gemseo_tempo.problems.brachistochrone.reference
+   gemseo_tempo.problems.sail.model
+   gemseo_tempo.problems.sail.polar
+   gemseo_tempo.problems.sail.problem
+   gemseo_tempo.problems.sail.wind
 ```
 
 ## Benchmarking

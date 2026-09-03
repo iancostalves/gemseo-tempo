@@ -97,6 +97,7 @@ guides/benchmarking
 :caption: Problems
 
 problems/brachistochrone
+problems/sail
 ```
 
 ```{toctree}
