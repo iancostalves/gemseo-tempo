@@ -20,13 +20,39 @@ split assembly (statics, dynamics, and outputs as coupled JAXDisciplines) are
 supported, along with a quasi-static vmapped execution path for
 AeroMAPS-style simulation models.
 
+## Status: pre-release
+
+gemseo-tempo is **not released yet**. There is no PyPI package, no tagged
+version, and no API stability guarantee: names and signatures may change
+without a deprecation period.
+
+What that does *not* mean is that it is untested. Everything documented is
+exercised by the test suite, which runs at full branch coverage, and the
+numbers quoted in the docs are checked against what the code computes.
+
+Implemented today: the three transcriptions (direct single shooting,
+Hermite-Simpson collocation, indirect shooting), the monolithic and split
+assemblies, the statics, dynamics and outputs stages, structure-aware
+Jacobians, the brachistochrone problem in three variants, and the
+one-factor-at-a-time benchmark studies. Still to come: the sail and albatross
+examples, calibration, uncertainty quantification, and the documentation's
+variable grammar.
+
 ## Installation
 
+There is no release on PyPI, so install from source:
+
 ```bash
-pip install gemseo-tempo
+git clone https://github.com/iancostalves/gemseo-tempo
+cd gemseo-tempo
+pip install -e ".[test,doc]"
 ```
 
-Optional extras: `test`, `doc`, `calibration`, `uq`.
+Python 3.11 to 3.13. Optional extras: `test`, `doc`, `calibration`, `uq`.
+
+Versions come from git tags via setuptools-scm. With no tags yet, an install
+reports something like `0.1.dev0+d20260705` — that is the expected fallback,
+not a broken install.
 
 ## A first problem: the brachistochrone
 

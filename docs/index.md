@@ -3,6 +3,15 @@
 A [GEMSEO](https://gemseo.org) plugin for multidisciplinary optimization of
 dynamic systems, built on JAX, diffrax and gemseo-jax.
 
+:::{admonition} Pre-release
+:class: caution
+
+gemseo-tempo has not been released: there is no package on PyPI, no tagged
+version, and the API may still change without a deprecation period. Install
+from source — see {doc}`getting_started/installation`, which also sets out
+what is available today and what is still to come.
+:::
+
 A dynamic optimization problem is described as three stages — **statics**,
 **dynamics** and **outputs** — and a **transcription** that decides what the
 optimizer actually sees. Swapping the transcription is one argument; the
