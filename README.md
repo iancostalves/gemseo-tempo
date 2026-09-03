@@ -48,6 +48,18 @@ cd gemseo-tempo
 pip install -e ".[test,doc]"
 ```
 
+Or install it directly as a dependency, without a working copy:
+
+```bash
+pip install "gemseo-tempo @ git+ssh://git@github.com/iancostalves/gemseo-tempo"
+```
+
+The repository is private, so this needs your GitHub credentials. SSH is the
+simplest route; over HTTPS
+(`git+https://github.com/iancostalves/gemseo-tempo`) a git credential helper
+will supply them. Do not put a token in the URL — it ends up in shell history
+and in build logs.
+
 Python 3.11 to 3.13. Optional extras: `test`, `doc`, `calibration`, `uq`.
 
 Versions come from git tags via setuptools-scm. With no tags yet, an install
