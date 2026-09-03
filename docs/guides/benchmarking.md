@@ -40,7 +40,8 @@ python examples/benchmark/run_studies.py --smoke        # one study, minutes
 python examples/benchmark/run_studies.py --study all    # the full sweep
 ```
 
-The full sweep takes roughly two to three hours. Every run is cached as JSON
+The full sweep takes on the order of an hour, with the finite-difference
+cells of the derivative study dominating the total. Every run is cached as JSON
 keyed by its configuration, so the sweep is **resumable**: interrupt it and
 re-run, and finished cells cost nothing.
 

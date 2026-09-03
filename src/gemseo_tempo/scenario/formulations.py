@@ -136,11 +136,18 @@ class BaseFormulationBuilder:
             )
         return design_space
 
-    def create_gemseo_scenario(self, **formulation_settings) -> BaseScenario:
+    def create_gemseo_scenario(
+        self, compile_jit: bool = True, **formulation_settings
+    ) -> BaseScenario:
         """Build the GEMSEO scenario with wired objective and constraints.
 
         Parameters
         ----------
+        compile_jit
+            Whether to JIT-compile the disciplines. A JAX discipline is not
+            compiled on construction, so leaving this off runs every
+            evaluation in eager mode, which costs orders of magnitude on
+            these problems.
         **formulation_settings
             The GEMSEO formulation settings; the formulation defaults to
             ``DisciplinaryOpt``, which chains the disciplines in order.
@@ -161,6 +168,14 @@ class BaseFormulationBuilder:
         )
         for name, kind in problem.constraint_names:
             gemseo_scenario.add_constraint(name, constraint_type=kind)
+        if compile_jit:
+            # Order matters: building the scenario and adding the
+            # constraints is what declares the differentiated inputs and
+            # outputs, and declaring them rebuilds the jacobian function.
+            # Compiling any earlier would leave that rebuilt jacobian
+            # uncompiled.
+            for discipline in self.scenario.disciplines:
+                discipline.compile_jit(pre_run=False)
         return gemseo_scenario
 
 

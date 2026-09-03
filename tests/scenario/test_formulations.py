@@ -161,3 +161,39 @@ def test_system_design_optimum():
     assert optimum.f_opt == pytest.approx(0.0, abs=1e-10)
     k_opt = float(optimum.x_opt_as_dict["constant.k"][0])
     assert k_opt == pytest.approx(numpy.log(2.0) / 2.0, abs=1e-5)
+
+
+def test_disciplines_are_compiled_by_default():
+    """A JAX discipline is not compiled on construction.
+
+    Without this the whole scenario runs in eager mode, which costs orders
+    of magnitude, so the formulation compiles the disciplines once the
+    differentiated inputs and outputs have been declared.
+    """
+    scenario = make_min_energy_scenario()
+    discipline = scenario.disciplines[0]
+    before = discipline.jax_out_func
+    formulation = OptimalControl(scenario, bounds={"control.u": (-3.0, 3.0)})
+    formulation.create_gemseo_scenario()
+    assert discipline.jax_out_func is not before
+
+
+def test_compilation_can_be_declined():
+    scenario = make_min_energy_scenario()
+    discipline = scenario.disciplines[0]
+    before = discipline.jax_out_func
+    formulation = OptimalControl(scenario, bounds={"control.u": (-3.0, 3.0)})
+    formulation.create_gemseo_scenario(compile_jit=False)
+    assert discipline.jax_out_func is before
+
+
+def test_compilation_does_not_change_the_optimum():
+    results = {}
+    for label, compiled in (("compiled", True), ("eager", False)):
+        scenario = make_min_energy_scenario()
+        gemseo_scenario = OptimalControl(
+            scenario, bounds={"control.u": (-3.0, 3.0)}
+        ).create_gemseo_scenario(compile_jit=compiled)
+        gemseo_scenario.execute(algo_name="SLSQP", max_iter=100)
+        results[label] = float(gemseo_scenario.optimization_result.f_opt)
+    assert results["compiled"] == pytest.approx(results["eager"], abs=1e-10)

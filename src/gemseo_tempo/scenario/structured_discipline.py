@@ -38,6 +38,7 @@ from numpy import asarray
 from numpy import atleast_2d
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from collections.abc import Iterable
 
     from gemseo_tempo.transcriptions.base import StructuredJacobian
@@ -62,6 +63,12 @@ class StructuredJAXDiscipline(JAXDiscipline):
             The keyword arguments of the base discipline.
         """
         self._structured_jacobian = structured_jacobian
+        # This discipline computes its Jacobian itself, so the compilation
+        # that JAXDiscipline.compile_jit applies to the generic jacobian
+        # function never reaches it. Compile the structured function here,
+        # and cache a compiled transform per set of differentiated names.
+        self._compiled_structure = jax.jit(structured_jacobian.function)
+        self._compiled_dense: dict[tuple, Callable] = {}
         super().__init__(*args, **kwargs)
 
     def _uses_structure(self, input_names: Iterable[str]) -> bool:
@@ -96,12 +103,17 @@ class StructuredJAXDiscipline(JAXDiscipline):
         dict
             ``{output: {input: array}}`` for the requested subset.
         """
+        key = (tuple(output_names), tuple(input_names))
+        transform = self._compiled_dense.get(key)
+        if transform is None:
 
-        def subset(differentiated):
-            outputs = self.jax_out_func({**data, **differentiated})
-            return {name: outputs[name] for name in output_names}
+            def subset(differentiated, fixed):
+                outputs = self.jax_out_func({**fixed, **differentiated})
+                return {name: outputs[name] for name in output_names}
 
-        return jax.jacrev(subset)({name: data[name] for name in input_names})
+            transform = jax.jit(jax.jacrev(subset))
+            self._compiled_dense[key] = transform
+        return transform({name: data[name] for name in input_names}, data)
 
     def _compute_jacobian(
         self,
@@ -129,7 +141,7 @@ class StructuredJAXDiscipline(JAXDiscipline):
 
         jacobian = {}
         if structured_outputs:
-            structured = self._structured_jacobian.function(data)
+            structured = self._compiled_structure(data)
             for name in structured_outputs:
                 jacobian[name] = {
                     input_name: structured[name][input_name]
