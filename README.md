@@ -26,7 +26,7 @@ AeroMAPS-style simulation models.
 pip install gemseo-tempo
 ```
 
-Optional extras: `test`, `doc`, `benchmark`, `calibration`, `uq`.
+Optional extras: `test`, `doc`, `calibration`, `uq`.
 
 ## A first problem: the brachistochrone
 
@@ -87,8 +87,9 @@ scenario = DynamicScenario(
 
 # The formulation picks the design variables (here the control + t_f), builds
 # the DesignSpace, and wires the objective and terminal constraints.
+# Bounds are keyed by the grammar name of the design variable.
 optimal_control = OptimalControl(
-    scenario, bounds={"gamma": (0.0, numpy.pi / 2), "t_f": (0.1, 5.0)}
+    scenario, bounds={"control.gamma": (0.0, numpy.pi / 2), "t_f": (0.1, 5.0)}
 )
 gemseo_scenario = optimal_control.create_gemseo_scenario()
 gemseo_scenario.execute(algo_name="SLSQP", max_iter=200)
@@ -99,13 +100,25 @@ print(f"minimum descent time: {t_f:.5f} s")  # -> 0.82434 s
 
 SLSQP recovers the cycloid optimum: the analytic minimum time to `(2, 2)`
 under `g = 9.81` is `0.82434 s`, matched here to five figures. Switching to
-collocation or indirect shooting will be a one-argument change
-(`transcription=...`) once those land; swapping the monolithic assembly for
-the split one is `assembly="split"`.
+collocation or indirect shooting is a one-argument change
+(`transcription=HermiteSimpson(num_segments=20)`); swapping the monolithic
+assembly for the split one is `assembly="split"`.
 
-> This snippet is the hand-written UX preview. The packaged, tested
-> `gemseo_tempo.problems.brachistochrone` (all three physical variants and
-> all three transcriptions) arrives in Sprint 7.
+The same problem is packaged, in three physical variants, as
+`gemseo_tempo.problems.brachistochrone`:
+
+```python
+from gemseo_tempo.problems.brachistochrone import create_optimization
+
+scenario, gemseo_scenario = create_optimization(variant="drag", size=30)
+gemseo_scenario.execute(algo_name="SLSQP", max_iter=200)
+```
+
+## Documentation
+
+Build it locally with `nox -s docs-serve`, which serves a live-reloading
+preview on <http://127.0.0.1:8000>, or `nox -s docs` for a one-shot build
+that treats warnings as errors.
 
 ## License
 

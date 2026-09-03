@@ -1,0 +1,55 @@
+name: docs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Needed by actions/deploy-pages to publish through OIDC.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two publishes race; queue them instead of cancelling, so a
+# deploy that has started is allowed to finish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # setuptools-scm needs the history to compute the version.
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install with doc extras
+        run: pip install -e ".[doc,test]"
+      - name: Check the docs match the code
+        run: pytest tests/test_docs.py -q
+      - name: Build documentation
+        run: sphinx-build -b html -W --keep-going docs docs/_build/html
+      - name: Upload the site
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/_build/html
+
+  # Publishing needs Pages enabled with "GitHub Actions" as the source, in
+  # Settings > Pages. On GitHub Free that requires a public repository.
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -41,3 +41,11 @@ pre-commit install
 - Tests: `pytest` (or `nox -s tests`), targeting Python 3.11 to 3.13.
 - Docs: `nox -s docs` builds with `-W` (warnings are errors).
 - Docstrings are numpy-style.
+- **Documentation ships with the change.** A commit that adds or alters
+  public behaviour updates `docs/` in the same commit: a new module goes in
+  `docs/reference/index.md`, and new behaviour is explained on the guide page
+  it belongs to. `tests/test_docs.py` enforces the mechanical half of this,
+  failing when a module is undocumented, when the reference points at
+  something that no longer exists, when a page is in no toctree, or when a
+  number quoted in the docs has drifted from what the code computes.
+- Preview the result with `nox -s docs-serve`, which rebuilds on save.

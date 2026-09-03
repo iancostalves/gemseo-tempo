@@ -41,9 +41,9 @@ test = [
 ]
 doc = [
     "sphinx >=7",
+    "sphinx-autobuild",
     "myst-parser",
     "sphinx-design",
-    "sphinx-gallery",
     "furo",
 ]
 calibration = [

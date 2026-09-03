@@ -33,3 +33,18 @@ def docs(session: nox.Session) -> None:
     session.run(
         "sphinx-build", "-b", "html", "-W", "--keep-going", "docs", "docs/_build/html"
     )
+
+
+@nox.session(name="docs-serve")
+def docs_serve(session: nox.Session) -> None:
+    """Serve the documentation locally, rebuilding as files change."""
+    session.install("-e", ".[doc]")
+    session.run(
+        "sphinx-autobuild",
+        "docs",
+        "docs/_build/html",
+        "--open-browser",
+        "--ignore",
+        "docs/reference/generated",
+        *session.posargs,
+    )

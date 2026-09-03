@@ -31,11 +31,19 @@ release = __version__
 extensions = [
     "myst_parser",
     "sphinx.ext.autodoc",
+    "sphinx.ext.autosummary",
     "sphinx.ext.napoleon",
     "sphinx.ext.intersphinx",
+    "sphinx.ext.viewcode",
     "sphinx_design",
     "tempo_myst",
 ]
+
+autosummary_generate = True
+autodoc_default_options = {"members": True, "undoc-members": False}
+# Instance attributes documented by a following string literal would
+# otherwise be reported twice, once from the class and once from __init__.
+autodoc_typehints = "description"
 
 myst_enable_extensions = [
     "colon_fence",
