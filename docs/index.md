@@ -96,6 +96,7 @@ guides/benchmarking
 :hidden:
 :caption: Problems
 
+problems/albatross
 problems/brachistochrone
 problems/sail
 ```

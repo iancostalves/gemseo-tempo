@@ -1,0 +1,254 @@
+# Copyright 2026 ISAE-SUPAERO, https://www.isae-supaero.fr/en/
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License version 3 as published by the Free Software Foundation.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with this program; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+"""The wing sizing that feeds the albatross dynamics.
+
+The dynamics need three numbers that are not states: how much induced drag
+the wing makes, how heavily it is loaded, and how slowly it can fly. None of
+them are independent quantities. They all follow from the mass and the wing
+plan, which is exactly what a statics chain is for: the design variables go in
+one end, and the coefficients the equations of motion actually use come out
+the other, differentiated along with everything else.
+
+Three models make the chain.
+
+:class:`WingGeometry` turns the plan into an aspect ratio and the induced-drag
+factor ``k`` of the drag polar ``C_D = C_D0 + k C_L^2``.
+
+:class:`StructuralMass` charges the bird for the wing it is carrying, which is
+what stops the co-design formulation from answering with an aspect ratio no
+bird has.
+
+:class:`FlightEnvelope` turns the mass and the plan into the wing loading and
+the speed below which the wing cannot hold the bird up.
+"""
+
+from __future__ import annotations
+
+import jax.numpy as jnp
+
+from gemseo_tempo.metadata.registry import VariableRegistry
+from gemseo_tempo.metadata.variable import Variable
+from gemseo_tempo.statics.chain import StaticsChain
+from gemseo_tempo.statics.model import AutoModel
+
+GRAVITY = 9.81
+"""The gravitational acceleration, in m/s^2."""
+
+AIR_DENSITY = 1.225
+"""The air density at sea level, in kg/m^3."""
+
+DESIGN_DEFAULTS = {
+    "body_mass": 6.4,
+    "wing_area": 0.65,
+    "wing_span": 3.44,
+    "oswald": 0.9,
+    "cl_max": 1.5,
+}
+"""The default wandering albatross, roughly to scale.
+
+A bird of about 8.5 kg all told, 6.4 kg of it body, on 0.65 m^2 of wing
+spanning 3.44 m, which is an aspect ratio near 18 and a best glide ratio
+near 20.
+"""
+
+WING_MASS_COEFFICIENT = 0.03354
+"""The constant of the wing mass law.
+
+Chosen so the default wing comes out at about 2.1 kg, a quarter of the
+bird. It is the number that decides where the aspect ratio settles, so it
+is worth stating plainly rather than burying.
+"""
+
+REGISTRY = VariableRegistry(
+    [
+        Variable(
+            name="body_mass",
+            full_name="Body mass",
+            description="Everything but the wing.",
+            unit="kg",
+            lower_bound=3.0,
+            upper_bound=12.0,
+            tags=frozenset({"design"}),
+        ),
+        Variable(
+            name="wing_mass",
+            full_name="Wing mass",
+            unit="kg",
+            tags=frozenset({"statics"}),
+        ),
+        Variable(
+            name="mass",
+            full_name="Total mass",
+            unit="kg",
+            tags=frozenset({"statics"}),
+        ),
+        Variable(
+            name="wing_area",
+            full_name="Wing area",
+            unit="m**2",
+            lower_bound=0.3,
+            upper_bound=1.2,
+            tags=frozenset({"design"}),
+        ),
+        Variable(
+            name="wing_span",
+            full_name="Wing span",
+            unit="m",
+            lower_bound=2.0,
+            upper_bound=5.0,
+            tags=frozenset({"design"}),
+        ),
+        Variable(
+            name="oswald",
+            full_name="Oswald efficiency",
+            description="Span efficiency of the lift distribution.",
+            lower_bound=0.5,
+            upper_bound=1.0,
+            tags=frozenset({"design"}),
+        ),
+        Variable(
+            name="cl_max",
+            full_name="Maximum lift coefficient",
+            lower_bound=0.5,
+            upper_bound=2.5,
+            tags=frozenset({"design"}),
+        ),
+        Variable(
+            name="aspect_ratio",
+            full_name="Aspect ratio",
+            description="Span squared over area.",
+            tags=frozenset({"statics"}),
+        ),
+        Variable(
+            name="induced_factor",
+            full_name="Induced drag factor",
+            description="The k of the drag polar C_D = C_D0 + k C_L^2.",
+            tags=frozenset({"statics"}),
+        ),
+        Variable(
+            name="wing_loading",
+            full_name="Wing loading",
+            unit="Pa",
+            tags=frozenset({"statics"}),
+        ),
+        Variable(
+            name="stall_speed",
+            full_name="Stall speed",
+            description="Level-flight airspeed at the maximum lift coefficient.",
+            unit="m/s",
+            tags=frozenset({"statics"}),
+        ),
+    ]
+)
+"""The metadata of the design and statics variables."""
+
+
+class WingGeometry(AutoModel):
+    """Aspect ratio and induced drag from the wing plan."""
+
+    def _jax_func(
+        self,
+        wing_area=DESIGN_DEFAULTS["wing_area"],
+        wing_span=DESIGN_DEFAULTS["wing_span"],
+        oswald=DESIGN_DEFAULTS["oswald"],
+    ):
+        """Return the aspect ratio and the induced drag factor.
+
+        A longer, narrower wing of the same area has a higher aspect ratio
+        and makes less drag for the same lift, which is the whole reason an
+        albatross is shaped the way it is.
+        """
+        aspect_ratio = wing_span**2 / wing_area
+        induced_factor = 1.0 / (jnp.pi * oswald * aspect_ratio)
+        return aspect_ratio, induced_factor
+
+
+class StructuralMass(AutoModel):
+    """Total mass from the body and the wing it has to carry.
+
+    Without this the problem has no design trade at all. Induced drag falls
+    with aspect ratio and nothing else in the model cares, so the optimizer
+    simply drives the span to whatever bound it is given and returns an
+    aspect ratio no bird has. A wing that costs mass to lengthen restores
+    the trade, and the answer stops being an artefact of the bounds.
+
+    The law is the usual bending-driven scaling,
+    ``m_wing ~ AR^1.5 sqrt(S)``. The exponent matters more than it looks.
+    A weaker law, mass growing as the square root of aspect ratio, leaves
+    the optimizer still sitting on its span bound, because shrinking the
+    area pays back almost exactly what lengthening the span costs. The
+    bending law is steep enough for the trade to bite.
+    """
+
+    def _jax_func(
+        self,
+        body_mass=DESIGN_DEFAULTS["body_mass"],
+        wing_area=DESIGN_DEFAULTS["wing_area"],
+        aspect_ratio=18.2,
+    ):
+        """Return the wing mass and the total mass."""
+        wing_mass = WING_MASS_COEFFICIENT * aspect_ratio**1.5 * jnp.sqrt(wing_area)
+        mass = body_mass + wing_mass
+        return wing_mass, mass
+
+
+class FlightEnvelope(AutoModel):
+    """Wing loading and stall speed from the mass and the wing plan."""
+
+    def _jax_func(
+        self,
+        mass=8.5,
+        wing_area=DESIGN_DEFAULTS["wing_area"],
+        cl_max=DESIGN_DEFAULTS["cl_max"],
+    ):
+        """Return the wing loading and the stall speed.
+
+        The stall speed is the level-flight airspeed at which the wing is
+        already at its maximum lift coefficient, so flying any slower means
+        falling.
+        """
+        wing_loading = mass * GRAVITY / wing_area
+        stall_speed = jnp.sqrt(2.0 * wing_loading / (AIR_DENSITY * cl_max))
+        return wing_loading, stall_speed
+
+
+def create_statics() -> StaticsChain:
+    """Build the chain from the wing design to the flight coefficients.
+
+    Returns
+    -------
+    StaticsChain
+        The chain, taking the design constants and producing the aspect
+        ratio, induced drag factor, wing loading and stall speed.
+    """
+    # A model's registry may only describe that model's own variables, so
+    # each gets the slice of the shared registry it actually uses.
+    geometry = REGISTRY.subset(
+        ["wing_area", "wing_span", "oswald", "aspect_ratio", "induced_factor"]
+    )
+    structure = REGISTRY.subset(
+        ["body_mass", "wing_area", "aspect_ratio", "wing_mass", "mass"]
+    )
+    envelope = REGISTRY.subset(
+        ["mass", "wing_area", "cl_max", "wing_loading", "stall_speed"]
+    )
+    return StaticsChain(
+        [
+            WingGeometry("geometry", geometry),
+            StructuralMass("structure", structure),
+            FlightEnvelope("envelope", envelope),
+        ],
+        list(DESIGN_DEFAULTS),
+    )

@@ -1,0 +1,442 @@
+# Copyright 2026 ISAE-SUPAERO, https://www.isae-supaero.fr/en/
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License version 3 as published by the Free Software Foundation.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with this program; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+"""Tests of the albatross dynamic soaring problem."""
+
+from __future__ import annotations
+
+import logging
+
+import jax
+import jax.numpy as jnp
+import numpy
+import pytest
+from matplotlib import pyplot
+
+from gemseo_tempo.dynamics import CubicControl
+from gemseo_tempo.dynamics import DiffraxIntegrator
+from gemseo_tempo.dynamics.integrators import Trajectory
+from gemseo_tempo.outputs import PeriodicityConstraint
+from gemseo_tempo.problems.albatross import DESIGN_DEFAULTS
+from gemseo_tempo.problems.albatross import MIN_HEIGHT
+from gemseo_tempo.problems.albatross import ROUGHNESS
+from gemseo_tempo.problems.albatross import Guess
+from gemseo_tempo.problems.albatross import create_codesign_optimization
+from gemseo_tempo.problems.albatross import create_codesign_scenario
+from gemseo_tempo.problems.albatross import create_energy_optimization
+from gemseo_tempo.problems.albatross import create_energy_scenario
+from gemseo_tempo.problems.albatross import create_state_space
+from gemseo_tempo.problems.albatross import create_statics
+from gemseo_tempo.problems.albatross import energy_budget
+from gemseo_tempo.problems.albatross import gliding_baseline
+from gemseo_tempo.problems.albatross import optimal_trajectory
+from gemseo_tempo.problems.albatross import plot_controls
+from gemseo_tempo.problems.albatross import plot_energy
+from gemseo_tempo.problems.albatross import plot_energy_analysis
+from gemseo_tempo.problems.albatross import plot_trajectory
+from gemseo_tempo.problems.albatross import soaring_cycle
+from gemseo_tempo.problems.albatross import wind_gradient
+from gemseo_tempo.problems.albatross import wind_speed
+from gemseo_tempo.problems.albatross.plots import _series
+from gemseo_tempo.transcriptions import SingleShooting
+
+logging.disable(logging.CRITICAL)
+
+SIZE = 12
+"""The discretization of the optimization tests, kept small for speed."""
+
+STRONG_WIND = 22.0
+"""A wind the cycle gains energy in, in m/s."""
+
+
+def solve_energy(w_ref, size=SIZE):
+    """Optimize the fixed-wind cycle and return the scenario and result.
+
+    Parameters
+    ----------
+    w_ref
+        The reference wind speed, in m/s.
+    size
+        The discretization.
+
+    Returns
+    -------
+    tuple
+        The dynamic scenario and the executed GEMSEO scenario.
+    """
+    scenario, gemseo_scenario = create_energy_optimization(size=size, w_ref=w_ref)
+    gemseo_scenario.execute(algo_name="SLSQP", max_iter=300)
+    return scenario, gemseo_scenario
+
+
+@pytest.fixture(scope="module")
+def soaring():
+    """Return the cycle optimized in a strong wind."""
+    return solve_energy(STRONG_WIND)
+
+
+@pytest.fixture(scope="module")
+def gliding():
+    """Return the same cycle with no wind at all."""
+    return solve_energy(0.0)
+
+
+@pytest.fixture(scope="module")
+def codesign():
+    """Return the minimum-wind co-design optimum."""
+    scenario, gemseo_scenario = create_codesign_optimization(size=SIZE)
+    gemseo_scenario.execute(algo_name="SLSQP", max_iter=500)
+    return scenario, gemseo_scenario
+
+
+# ------------------------------------------------------------- the statics
+
+
+def test_wing_geometry_matches_the_closed_forms():
+    """Aspect ratio and induced factor are what the definitions say."""
+    outputs = create_statics()(DESIGN_DEFAULTS)
+    area = DESIGN_DEFAULTS["wing_area"]
+    span = DESIGN_DEFAULTS["wing_span"]
+    assert float(outputs["aspect_ratio"]) == pytest.approx(span**2 / area)
+    assert float(outputs["induced_factor"]) == pytest.approx(
+        1.0 / (numpy.pi * DESIGN_DEFAULTS["oswald"] * span**2 / area)
+    )
+
+
+def test_the_default_bird_is_an_albatross():
+    """The defaults describe a real animal, not an arbitrary one."""
+    outputs = create_statics()(DESIGN_DEFAULTS)
+    assert float(outputs["mass"]) == pytest.approx(8.5, abs=0.05)
+    assert 15.0 < float(outputs["aspect_ratio"]) < 22.0
+    # Stall speed of order 10 m/s: fast for a bird, slow for an aircraft.
+    assert 8.0 < float(outputs["stall_speed"]) < 15.0
+
+
+def test_a_longer_wing_costs_mass():
+    """The structural law is what stops the aspect ratio running away."""
+    chain = create_statics()
+    stubby = dict(DESIGN_DEFAULTS, wing_area=0.8, wing_span=3.2)
+    lanky = dict(DESIGN_DEFAULTS, wing_area=0.5, wing_span=4.2)
+    assert float(chain(lanky)["aspect_ratio"]) > float(chain(stubby)["aspect_ratio"])
+    assert float(chain(lanky)["wing_mass"]) > float(chain(stubby)["wing_mass"])
+
+
+def test_the_statics_chain_is_jittable():
+    """The chain composes into a traced program, not just a callable."""
+    chain = create_statics()
+    jitted = jax.jit(chain.__call__)
+    assert float(jitted(DESIGN_DEFAULTS)["mass"]) == pytest.approx(
+        float(chain(DESIGN_DEFAULTS)["mass"])
+    )
+
+
+# ---------------------------------------------------------------- the wind
+
+
+def test_wind_profile_is_physical():
+    """The wind grows with height, and its gradient is positive and falling."""
+    heights = numpy.linspace(MIN_HEIGHT, 60.0, 200)
+    speeds = numpy.array([float(wind_speed(h, 12.0)) for h in heights])
+    gradients = numpy.array([float(wind_gradient(h, 12.0)) for h in heights])
+    assert numpy.all(numpy.diff(speeds) > 0.0)
+    assert numpy.all(gradients > 0.0)
+    # Steepest near the surface, which is why the bird flies low.
+    assert numpy.all(numpy.diff(gradients) < 0.0)
+    # The profile is singular at the roughness length; the smooth floor
+    # keeps it finite and close to its value at the lowest flyable height.
+    at_the_surface = float(wind_speed(ROUGHNESS, 12.0))
+    assert numpy.isfinite(at_the_surface)
+    assert at_the_surface == pytest.approx(
+        float(wind_speed(MIN_HEIGHT, 12.0)), rel=0.05
+    )
+
+
+def test_the_wind_gradient_is_the_derivative_of_the_profile():
+    """The analytic gradient agrees with differentiating the profile."""
+    derivative = jax.grad(lambda h: wind_speed(h, 12.0))
+    for height in (2.0, 5.0, 15.0, 40.0):
+        assert float(wind_gradient(height, 12.0)) == pytest.approx(
+            float(derivative(height)), rel=1e-3
+        )
+
+
+def test_no_wind_means_no_gradient():
+    assert float(wind_gradient(10.0, 0.0)) == 0.0
+    assert float(wind_speed(10.0, 0.0)) == 0.0
+
+
+# ----------------------------------------------------------- the energetics
+
+
+def test_gliding_only_ever_loses_energy(gliding):
+    """With no gradient there is nothing to extract, and drag still bites."""
+    scenario, gemseo_scenario = gliding
+    trajectory = optimal_trajectory(scenario, gemseo_scenario)
+    budget = energy_budget(trajectory)
+    assert budget["gradient_work"] == pytest.approx(0.0, abs=1e-9)
+    assert budget["drag_work"] < 0.0
+    assert budget["air_change"] < 0.0
+
+
+@pytest.mark.parametrize("w_ref", [0.0, 12.0])
+def test_the_energy_budget_closes(w_ref):
+    """The rate of change of energy is exactly drag plus wind-gradient work.
+
+    This is the check a sign error cannot survive: with the wind terms the
+    wrong way round the cycle would still appear to gain energy, but the
+    gain would not match the work that produced it.
+
+    It is asserted on a directly integrated trajectory rather than an
+    optimized one, on a fine grid, so what is being measured is the model
+    and not the quadrature.
+    """
+    state_space = create_state_space()
+    statics = create_statics()(DESIGN_DEFAULTS)
+    theta = {
+        "w_ref": w_ref,
+        "mass": float(statics["mass"]),
+        "wing_area": DESIGN_DEFAULTS["wing_area"],
+        "induced_factor": float(statics["induced_factor"]),
+    }
+    knots = jnp.linspace(0.0, 12.0, 9)
+    controls = (
+        CubicControl("cl", knots, default_params=0.7 * jnp.ones(9)),
+        CubicControl("mu", knots, default_params=0.3 * jnp.ones(9)),
+    )
+    trajectory = DiffraxIntegrator(rtol=1e-12, atol=1e-12, n_save=2001).integrate(
+        state_space,
+        {"x": 0.0, "y": 0.0, "h": 20.0, "V": 25.0, "gamma": -0.05, "psi": 0.6},
+        controls,
+        {
+            name: control.default_params
+            for name, control in zip(("cl", "mu"), controls, strict=True)
+        },
+        theta,
+        0.0,
+        12.0,
+    )
+    times = numpy.asarray(trajectory.ts)
+    measured = numpy.gradient(_series(trajectory, "specific_energy"), times)
+    accounted = _series(trajectory, "drag_power") + _series(
+        trajectory, "gradient_power"
+    )
+    # Trim the ends, where the one-sided finite difference is least accurate.
+    error = numpy.max(numpy.abs(measured - accounted)[3:-3])
+    assert error / numpy.max(numpy.abs(accounted)) < 5e-3
+
+
+def test_the_wind_gradient_is_what_pays_for_the_flight(soaring):
+    """Energy comes from the gradient, and only from the gradient."""
+    scenario, gemseo_scenario = soaring
+    trajectory = optimal_trajectory(scenario, gemseo_scenario)
+    budget = energy_budget(trajectory)
+    assert budget["gradient_work"] > 0.0
+    assert budget["drag_work"] < 0.0
+    # In a strong enough wind the gradient more than covers the drag.
+    assert budget["gradient_work"] > -budget["drag_work"]
+    assert budget["air_change"] > 0.0
+
+
+def test_the_two_frames_tell_different_stories(soaring):
+    """The inertial frame swings far more than the air-relative one.
+
+    Both describe the same flight. The bird is carried along by air that
+    moves faster higher up, so its speed over the water changes much more
+    than its speed through the air, and the gap between the two is exactly
+    the wind it is riding.
+    """
+    scenario, gemseo_scenario = soaring
+    trajectory = optimal_trajectory(scenario, gemseo_scenario)
+    air = _series(trajectory, "specific_energy")
+    ground = _series(trajectory, "ground_energy")
+    assert numpy.ptp(ground) > numpy.ptp(air)
+    # Ground speed exceeds airspeed on average, because the wind helps more
+    # of the time than it hinders over a cycle that is flown deliberately.
+    assert numpy.mean(ground) > numpy.mean(air)
+
+
+def test_soaring_beats_gliding(soaring, gliding):
+    """The whole point: a wind gradient turns a losing cycle into a winning one."""
+    soaring_scenario, soaring_gemseo = soaring
+    gliding_scenario, gliding_gemseo = gliding
+    soaring_energy = -float(soaring_gemseo.optimization_result.f_opt)
+    gliding_energy = -float(gliding_gemseo.optimization_result.f_opt)
+    assert soaring_energy > gliding_energy
+    # The margin is large, not marginal.
+    assert soaring_energy > 1.2 * gliding_energy
+
+
+# --------------------------------------------------------- the formulations
+
+
+def test_the_cycle_closes(soaring):
+    """Height and attitude return to where they started, to 1e-5."""
+    _, gemseo_scenario = soaring
+    result = gemseo_scenario.optimization_result
+    database = gemseo_scenario.formulation.optimization_problem.database
+    residuals = numpy.asarray(
+        database.get_function_value("constraint.cycle", result.x_opt)
+    )
+    assert numpy.max(numpy.abs(residuals)) < 1e-5
+
+
+def test_the_heading_comes_back_around(soaring):
+    """The bird turns through a full circle rather than staying put.
+
+    The heading is periodic only modulo a turn, which is why the constraint
+    carries an offset. Without it the cycle could not close at all.
+    """
+    scenario, gemseo_scenario = soaring
+    trajectory = optimal_trajectory(scenario, gemseo_scenario)
+    heading = _series(trajectory, "psi")
+    assert heading[-1] - heading[0] == pytest.approx(2.0 * numpy.pi, abs=1e-4)
+
+
+def test_codesign_finds_a_weaker_wind_than_the_fixed_cycle(codesign):
+    """Freeing the cycle and the wing buys a lot of wind.
+
+    The fixed-wind formulation flies one prescribed cycle shape and needs
+    around 18 m/s before it breaks even. Letting the optimizer choose the
+    cycle, its duration, where it starts and the wing itself brings that
+    down by a wide margin.
+    """
+    _, gemseo_scenario = codesign
+    minimum_wind = float(gemseo_scenario.optimization_result.f_opt)
+    assert 4.0 < minimum_wind < 14.0
+    assert minimum_wind < 0.75 * 17.7
+
+
+def test_codesign_uses_the_span_it_is_given(codesign):
+    """The wing goes to the highest aspect ratio the bounds allow.
+
+    Within this model the wind a cycle needs falls monotonically with
+    aspect ratio, so the design bound is active at the optimum. That is a
+    property of the model rather than a failure of the optimizer, and the
+    bounds are the observed range of a real bird for exactly that reason.
+    """
+    _, gemseo_scenario = codesign
+    optimum = gemseo_scenario.optimization_result.x_opt_as_dict
+    area = float(optimum["constant.wing_area"][0])
+    span = float(optimum["constant.wing_span"][0])
+    assert span == pytest.approx(3.7, abs=1e-3)
+    assert (
+        span**2 / area
+        > DESIGN_DEFAULTS["wing_span"] ** 2 / (DESIGN_DEFAULTS["wing_area"])
+    )
+
+
+def test_the_codesign_cycle_closes_completely(codesign):
+    """Speed closes too, so the cycle is genuinely energy-neutral."""
+    scenario, gemseo_scenario = codesign
+    result = gemseo_scenario.optimization_result
+    database = gemseo_scenario.formulation.optimization_problem.database
+    residuals = numpy.asarray(
+        database.get_function_value("constraint.cycle", result.x_opt)
+    )
+    assert numpy.max(numpy.abs(residuals)) < 1e-5
+    trajectory = optimal_trajectory(scenario, gemseo_scenario)
+    air = _series(trajectory, "specific_energy")
+    assert air[-1] == pytest.approx(air[0], abs=1e-3)
+
+
+def test_the_split_assembly_jacobians_are_right():
+    """Finite differences agree with the analytic Jacobian, split apart.
+
+    The split assembly is the one that differentiates the statics chain
+    separately from the dynamics, so it is where a mistake in the coupling
+    between the wing and the equations of motion would show up.
+    """
+    scenario = create_energy_scenario(
+        transcription=SingleShooting(),
+        size=6,
+        assembly="split",
+        integrator=DiffraxIntegrator(dt0=0.02, n_save=7),
+    )
+    for discipline in scenario.disciplines:
+        assert discipline.check_jacobian(threshold=1e-3, step=1e-7), discipline.name
+
+
+# --------------------------------------------------------------- the guards
+
+
+def test_periodicity_offsets_must_name_periodic_states():
+    with pytest.raises(ValueError, match="not periodic"):
+        PeriodicityConstraint("cycle", ["h", "V"], offsets={"psi": 1.0})
+
+
+def test_a_missing_series_is_reported():
+    trajectory = Trajectory(
+        ts=jnp.zeros(3), states={"h": jnp.zeros(3)}, controls={}, outputs={}
+    )
+    assert _series(trajectory, "h") is not None
+    with pytest.raises(KeyError, match="No series named"):
+        _series(trajectory, "not_a_series")
+
+
+def test_the_guessed_cycle_is_closed_and_inside_the_envelope():
+    """The starting point is flyable before any optimizer touches it."""
+    _, states, controls = soaring_cycle(Guess(), 12.0, None, 41)
+    height = numpy.asarray(states["h"])
+    assert height.min() > MIN_HEIGHT
+    assert float(states["h"][-1]) == pytest.approx(float(states["h"][0]), abs=1e-6)
+    assert float(states["psi"][-1] - states["psi"][0]) == pytest.approx(2.0 * numpy.pi)
+    lift_coefficient = numpy.asarray(controls["cl"])
+    assert 0.0 < lift_coefficient.min()
+    assert lift_coefficient.max() < 1.4
+
+
+# ---------------------------------------------------------------- the plots
+
+
+def test_every_figure_draws(soaring):
+    scenario, gemseo_scenario = soaring
+    trajectory = optimal_trajectory(scenario, gemseo_scenario)
+    assert plot_trajectory(trajectory) is not None
+    assert plot_controls(trajectory) is not None
+    assert plot_energy(trajectory) is not None
+    axes = plot_energy_analysis(trajectory)
+    assert len(axes) == 3
+
+
+def test_gliding_baseline_is_the_energy_a_glide_ends_with():
+    """The still-air baseline is a real optimization, not an assumed number."""
+    baseline = gliding_baseline(size=6)
+    # A glide starts near 69 m of specific energy and can only lose.
+    assert 0.0 < baseline < 69.2
+
+
+def test_the_codesign_scenario_accepts_shooting():
+    """Collocation is the default, but it is not the only option.
+
+    Shooting has no node grid to seed, so this exercises the branch that
+    skips the warm start.
+    """
+    scenario = create_codesign_scenario(transcription=SingleShooting(), size=6)
+    assert scenario.problem.design_variables
+
+
+def test_every_figure_accepts_an_existing_axis(soaring):
+    scenario, gemseo_scenario = soaring
+    trajectory = optimal_trajectory(scenario, gemseo_scenario)
+
+    figure = pyplot.figure()
+    spatial = figure.add_subplot(projection="3d")
+    assert plot_trajectory(trajectory, spatial) is spatial
+
+    _, flat = pyplot.subplots()
+    assert plot_controls(trajectory, flat) is flat
+    _, another = pyplot.subplots()
+    assert plot_energy(trajectory, another) is another
+    _, three = pyplot.subplots(3, 1)
+    assert plot_energy_analysis(trajectory, three) is three
