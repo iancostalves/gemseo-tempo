@@ -29,8 +29,8 @@ from gemseo_tempo.problems.sail import create_optimization
 from gemseo_tempo.problems.sail import create_scenario
 from gemseo_tempo.problems.sail import create_wind
 from gemseo_tempo.problems.sail import default_guess
-from gemseo_tempo.problems.sail import no_go_constraint
 from gemseo_tempo.problems.sail import downwind_vmg
+from gemseo_tempo.problems.sail import no_go_constraint
 from gemseo_tempo.problems.sail import plot_polar
 from gemseo_tempo.problems.sail import speed_shape
 from gemseo_tempo.problems.sail import straight_run_time

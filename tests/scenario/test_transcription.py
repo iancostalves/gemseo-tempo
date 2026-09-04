@@ -221,6 +221,49 @@ def test_free_final_time_and_free_initial():
     assert float(outputs["times"][-1]) == pytest.approx(3.0)
 
 
+def test_some_initial_states_free_and_others_fixed():
+    """Shooting must cope with a problem that frees only part of the state.
+
+    A free initial value is a length-one design variable and a fixed one is
+    a bare scalar. Mixing them used to make the state vector impossible to
+    stack, so any problem that pinned where it started but let the rest of
+    the state float failed before it ever integrated.
+    """
+    space = StateSpace(
+        states=["x", "y"],
+        controls=["u"],
+        rhs=lambda t, s, u, theta: {"x": u["u"], "y": -s["y"]},
+    )
+    boundary = BoundarySpec(
+        s0={"x": 0.0, "y": 1.0},
+        fix_initial={"x": True, "y": False},
+    )
+    problem = transcribe(
+        state_space=space,
+        boundary=boundary,
+        constraints=(PeriodicityConstraint("cycle", ["y"]),),
+    )
+    assert set(problem.design_variables) == {"control.u", "initial.y"}
+    outputs = problem.jax_function(problem.input_defaults)
+    # y decays from its free initial value, so the cycle does not close.
+    assert numpy.asarray(outputs["constraint.cycle"]).shape == (1,)
+    assert float(outputs["constraint.cycle"][0]) < 0.0
+
+
+def test_periodicity_offsets_close_a_winding_state():
+    """A state that winds returns to itself having gained the offset."""
+    boundary = BoundarySpec(s0={"x": 0.0}, fix_initial={"x": False})
+    problem = transcribe(
+        boundary=boundary,
+        constraints=(PeriodicityConstraint("cycle", ["x"], offsets={"x": 2.0}),),
+    )
+    inputs = dict(problem.input_defaults)
+    # x' = u with u = 1 over [0, 2] gains exactly 2, which the offset expects.
+    inputs["control.u"] = jnp.ones(5)
+    outputs = problem.jax_function(inputs)
+    assert float(outputs["constraint.cycle"][0]) == pytest.approx(0.0, abs=1e-9)
+
+
 def test_fix_final_terminal_equality():
     boundary = BoundarySpec(s0={"x": 0.0}, fix_final={"x": True}, s1={"x": 1.5})
     problem = transcribe(boundary=boundary)

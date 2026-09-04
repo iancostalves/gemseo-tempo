@@ -27,6 +27,7 @@ from jax.scipy.special import logsumexp
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from collections.abc import Mapping
     from collections.abc import Sequence
 
 
@@ -180,13 +181,24 @@ class TerminalConstraint(AbstractConstraint):
 
 
 class PeriodicityConstraint(AbstractConstraint):
-    """The equality ``s(t1) - s(t0) = 0`` on selected states.
+    """The equality ``s(t1) - s(t0) = offset`` on selected states.
 
     Periodic problems promote the initial states to design variables
     (``fix_initial=False``) and close the cycle with this constraint.
+
+    The offset defaults to zero, which is what most states want. It exists
+    for the ones that repeat without returning to the same number: a heading
+    that winds through a full turn comes back to the same direction of
+    flight having gained ``2 pi``, and demanding plain equality of it would
+    forbid the very cycle the problem is about.
     """
 
-    def __init__(self, name: str, state_names: Sequence[str]) -> None:
+    def __init__(
+        self,
+        name: str,
+        state_names: Sequence[str],
+        offsets: Mapping[str, float] | None = None,
+    ) -> None:
         """Store the periodic states.
 
         Parameters
@@ -195,9 +207,21 @@ class PeriodicityConstraint(AbstractConstraint):
             The output name.
         state_names
             The names of the states to close periodically.
+        offsets
+            The amount each state is allowed to gain over the cycle;
+            missing names must return exactly.
+
+        Raises
+        ------
+        ValueError
+            If an offset names a state that is not being closed.
         """
         super().__init__(name, "eq")
         self.state_names = tuple(state_names)
+        self.offsets = dict(offsets or {})
+        unknown = sorted(set(self.offsets) - set(self.state_names))
+        if unknown:
+            raise ValueError(f"Offsets {unknown} name states that are not periodic.")
 
     def evaluate(self, initial_states: dict, final_states: dict) -> jnp.ndarray:
         """Compute the periodicity residuals.
@@ -212,8 +236,11 @@ class PeriodicityConstraint(AbstractConstraint):
         Returns
         -------
         Array
-            The stacked residuals ``s(t1) - s(t0)``.
+            The stacked residuals ``s(t1) - s(t0) - offset``.
         """
         return jnp.stack(
-            [final_states[name] - initial_states[name] for name in self.state_names]
+            [
+                final_states[name] - initial_states[name] - self.offsets.get(name, 0.0)
+                for name in self.state_names
+            ]
         )

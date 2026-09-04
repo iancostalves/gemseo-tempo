@@ -180,8 +180,13 @@ class SingleShooting(AbstractTranscription):
                 for control in controls
             }
             s0 = {
+                # A free initial value arrives as a length-one design
+                # variable and a fixed one as a bare scalar. Left as they
+                # are, a problem that frees some initial states and fixes
+                # others cannot have its state vector stacked at all, so
+                # both are reshaped to a scalar here.
                 name: (
-                    data[INITIAL_PREFIX + name]
+                    jnp.reshape(data[INITIAL_PREFIX + name], ())
                     if not boundary.is_initial_fixed(name)
                     else jnp.asarray(boundary.s0[name], dtype=float)
                 )
