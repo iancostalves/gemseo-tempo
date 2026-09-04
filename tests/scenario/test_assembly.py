@@ -114,13 +114,18 @@ def test_forward_mode_with_direct_adjoint(lqr_pieces):
         discipline.add_differentiated_inputs(["control.u", "constant.k"])
         discipline.add_differentiated_outputs(["cost"])
         discipline.linearize()
-    difference = numpy.max(
-        numpy.abs(
-            numpy.asarray(forward_disc.jac["cost"]["control.u"])
-            - numpy.asarray(reverse_disc.jac["cost"]["control.u"])
-        )
-    )
-    assert difference < 1e-9
+    forward_jac = numpy.asarray(forward_disc.jac["cost"]["control.u"])
+    reverse_jac = numpy.asarray(reverse_disc.jac["cost"]["control.u"])
+    # Relative, and not tight. The two runs use different adjoints, Direct
+    # against RecursiveCheckpoint, so they do not take the same steps, and
+    # the solver's error control bounds the solution rather than its
+    # derivative. An absolute 1e-9 held on one platform and failed on
+    # another by 3.6e-8, which said more about the step sequence than about
+    # the derivative. What this is really checking is that forward mode
+    # computes the same jacobian at all, and any real error there would be
+    # of order one rather than of order 1e-8.
+    difference = numpy.max(numpy.abs(forward_jac - reverse_jac))
+    assert difference / numpy.max(numpy.abs(reverse_jac)) < 1e-6
 
 
 def test_forward_mode_rejects_recursive_adjoint(lqr_pieces):
