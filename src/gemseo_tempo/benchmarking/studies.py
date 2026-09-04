@@ -29,7 +29,6 @@ from pathlib import Path
 
 from gemseo_tempo.benchmarking.runner import Record
 from gemseo_tempo.benchmarking.runner import run_one
-from gemseo_tempo.benchmarking.sampling import sample_guesses
 
 SIZES = (3, 10, 30, 100)
 """The discretizations swept by every study."""
@@ -81,14 +80,44 @@ STUDIES = {
 """The three studies, each varying one factor away from the baseline."""
 
 
+def studies_for(suite) -> dict:
+    """Return the studies a suite can run.
+
+    A study is only meaningful if the suite offers every level it varies, so
+    the transcription study drops out for a problem that has one
+    transcription, and the optimizer study uses that suite's own list.
+
+    Parameters
+    ----------
+    suite
+        The suite.
+
+    Returns
+    -------
+    dict
+        The runnable studies, by name.
+    """
+    runnable = {}
+    for name, levels in STUDIES.items():
+        if name == "optimizer":
+            levels = tuple(
+                Level(algo, "collocation", algo_name=algo) for algo in suite.algorithms
+            )
+        kept = tuple(level for level in levels if suite.supports(level.level))
+        if len(kept) > 1:
+            runnable[name] = kept
+    return runnable
+
+
 def run_study(
     study: str,
-    sizes=SIZES,
-    n_starts: int = N_STARTS,
+    sizes=None,
+    n_starts: int | None = None,
     max_iter: int = 200,
-    variant: str = "ideal",
+    variant: str | None = None,
     cache: Path | None = None,
     seed: int = 0,
+    suite=None,
 ) -> list[Record]:
     """Run every cell of one study.
 
@@ -109,6 +138,9 @@ def run_study(
         the sweep resumable: cached runs are read back instead of redone.
     seed
         The sampling seed.
+    suite
+        The problem to run; the brachistochrone when omitted. Its own
+        sizes, starts and variant are used unless overridden.
 
     Returns
     -------
@@ -118,28 +150,41 @@ def run_study(
     Raises
     ------
     ValueError
-        If the study name is unknown.
+        If the study name is unknown, or the suite cannot run it.
     """
+    from gemseo_tempo.benchmarking.suites import BRACHISTOCHRONE
+
+    suite = suite or BRACHISTOCHRONE
     if study not in STUDIES:
         raise ValueError(f"Unknown study {study!r}; use one of {sorted(STUDIES)}.")
-    guesses = sample_guesses(n_starts, seed=seed)
+    runnable = studies_for(suite)
+    if study not in runnable:
+        raise ValueError(
+            f"Suite {suite.name!r} cannot run the {study!r} study:"
+            f" it offers levels {list(suite.levels)}."
+        )
+    sizes = suite.sizes if sizes is None else sizes
+    n_starts = suite.starts if n_starts is None else n_starts
+    variant = suite.variants[0] if variant is None else variant
+    guesses = suite.sample(n_starts, seed)
     records = []
-    for level in STUDIES[study]:
+    for level in runnable[study]:
         for size in sizes:
             for index, guess in enumerate(guesses):
                 record = _cached_or_run(
-                    study, level, size, guess, index, max_iter, variant, cache
+                    study, level, size, guess, index, max_iter, variant, cache, suite
                 )
                 records.append(record)
     return records
 
 
-def _cached_or_run(study, level, size, guess, index, max_iter, variant, cache):
+def _cached_or_run(study, level, size, guess, index, max_iter, variant, cache, suite):
     """Return a cached record when available, otherwise run the cell."""
     path = None
     if cache is not None:
         cache.mkdir(parents=True, exist_ok=True)
-        stem = f"{study}_{level.name}_{size}_{index}_{variant}".replace(" ", "-")
+        stem = f"{suite.name}_{study}_{level.name}_{size}_{index}_{variant}"
+        stem = stem.replace(" ", "-")
         path = cache / f"{stem}.json"
         if path.exists():
             return Record(**json.loads(path.read_text(encoding="utf-8")))
@@ -153,6 +198,7 @@ def _cached_or_run(study, level, size, guess, index, max_iter, variant, cache):
         derivative=level.derivative,
         variant=variant,
         max_iter=max_iter,
+        suite=suite,
     )
     # The level name is what the figure shows, not the transcription key.
     record.level = level.name

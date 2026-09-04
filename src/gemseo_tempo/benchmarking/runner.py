@@ -31,13 +31,7 @@ from dataclasses import field
 
 from gemseo.core.discipline.discipline import Discipline
 
-from gemseo_tempo.problems.brachistochrone.problem import Guess
-from gemseo_tempo.problems.brachistochrone.problem import create_optimization
-from gemseo_tempo.problems.brachistochrone.problem import optimal_path_angle
-from gemseo_tempo.problems.brachistochrone.reference import reference_time
-from gemseo_tempo.transcriptions.collocation import HermiteSimpson
-from gemseo_tempo.transcriptions.indirect import IndirectShooting
-from gemseo_tempo.transcriptions.single_shooting import SingleShooting
+from gemseo_tempo.benchmarking.suites import BRACHISTOCHRONE
 
 CONVERGED = "converged"
 """The run reached the reference within tolerance."""
@@ -83,7 +77,9 @@ class Record:
         return asdict(self)
 
 
-def classify(error: float, calls: int, max_iter: int) -> str:
+def classify(
+    error: float, calls: int, max_iter: int, accuracy: float = ACCURACY
+) -> str:
     """Return the status of a finished run.
 
     Parameters
@@ -94,6 +90,9 @@ def classify(error: float, calls: int, max_iter: int) -> str:
         The number of discipline calls used.
     max_iter
         The iteration budget.
+    accuracy
+        The relative error below which the run counts as converged; the
+        suite's own, since the problems do not share a floor.
 
     Returns
     -------
@@ -102,56 +101,24 @@ def classify(error: float, calls: int, max_iter: int) -> str:
         :data:`BUDGET` when the budget ran out first, and
         :data:`INACCURATE` when the run stopped early on a wrong answer.
     """
-    if error <= ACCURACY:
+    if error <= accuracy:
         return CONVERGED
     if calls >= max_iter:
         return BUDGET
     return INACCURATE
 
 
-def build_transcription(level: str, size: int):
-    """Return the transcription and control settings of a level.
-
-    Parameters
-    ----------
-    level
-        The level name.
-    size
-        The discretization.
-
-    Returns
-    -------
-    tuple
-        The transcription and the effective size to build the problem with.
-
-    Raises
-    ------
-    ValueError
-        If the level is unknown.
-    """
-    if level == "shooting":
-        return SingleShooting(), size
-    if level == "collocation":
-        return HermiteSimpson(num_segments=size), size
-    if level == "collocation-sparse":
-        return HermiteSimpson(num_segments=size, sparse_jacobian=True), size
-    if level == "indirect":
-        # The indirect method has no path discretization; the abscissa is
-        # its integrator save resolution instead.
-        return IndirectShooting(u_star=optimal_path_angle), size
-    raise ValueError(f"Unknown level {level!r}.")
-
-
 def run_one(
     study: str,
     level: str,
     size: int,
-    guess: Guess,
+    guess,
     seed: int,
     algo_name: str = "SLSQP",
     derivative: str = "auto",
     variant: str = "ideal",
     max_iter: int = 200,
+    suite=None,
 ) -> Record:
     """Run one configuration and record the outcome.
 
@@ -176,22 +143,25 @@ def run_one(
         The physical variant.
     max_iter
         The iteration budget.
+    suite
+        The problem to run; the brachistochrone when omitted, which is what
+        every caller wanted before there was more than one.
 
     Returns
     -------
     Record
         The outcome, never raising: a failure is reported as a status.
     """
-    target = reference_time(variant)
+    suite = suite or BRACHISTOCHRONE
+    target = suite.target(variant)
     started = time.perf_counter()
     try:
-        transcription, effective = build_transcription(level, size)
-        scenario, gemseo_scenario = create_optimization(
-            transcription=transcription,
-            variant=variant,
-            size=effective,
-            guess=guess,
-        )
+        if not suite.supports(level):
+            raise ValueError(
+                f"Suite {suite.name!r} does not offer level {level!r};"
+                f" it offers {list(suite.levels)}."
+            )
+        scenario, gemseo_scenario = suite.build(level, size, guess, variant)
         n_design = sum(spec.size for spec in scenario.problem.design_variables.values())
         if derivative == "fd":
             for discipline in scenario.disciplines:
@@ -206,7 +176,7 @@ def run_one(
         calls = len(problem.database)
         objective = float(gemseo_scenario.optimization_result.f_opt)
         error = abs(objective - target) / target
-        status = classify(error, calls, max_iter)
+        status = classify(error, calls, max_iter, suite.accuracy)
     except Exception as error_raised:  # noqa: BLE001
         return Record(
             study=study,
@@ -219,7 +189,7 @@ def run_one(
             error=float("nan"),
             status=FAILED,
             variant=variant,
-            extra={"error": type(error_raised).__name__},
+            extra={"error": type(error_raised).__name__, "suite": suite.name},
         )
     return Record(
         study=study,
@@ -233,4 +203,5 @@ def run_one(
         status=status,
         n_design_variables=n_design,
         variant=variant,
+        extra={"suite": suite.name},
     )

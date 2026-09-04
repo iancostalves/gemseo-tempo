@@ -1,0 +1,162 @@
+[
+ {
+  "study": "transcription",
+  "level": "shooting",
+  "size": 25,
+  "seed": 0,
+  "calls": 250,
+  "seconds": 19.539781600004062,
+  "objective": 159.77175856736005,
+  "error": 0.004314435129137442,
+  "status": "converged",
+  "n_design_variables": 27,
+  "variant": "default",
+  "extra": {
+   "suite": "sail"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "shooting",
+  "size": 25,
+  "seed": 1,
+  "calls": 250,
+  "seconds": 16.241728000022704,
+  "objective": 159.39947629698884,
+  "error": 0.001974294033933636,
+  "status": "converged",
+  "n_design_variables": 27,
+  "variant": "default",
+  "extra": {
+   "suite": "sail"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "shooting",
+  "size": 25,
+  "seed": 2,
+  "calls": 250,
+  "seconds": 16.83777749998262,
+  "objective": 159.58123098516157,
+  "error": 0.00311679167319765,
+  "status": "converged",
+  "n_design_variables": 27,
+  "variant": "default",
+  "extra": {
+   "suite": "sail"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "shooting",
+  "size": 25,
+  "seed": 3,
+  "calls": 250,
+  "seconds": 16.404375500016613,
+  "objective": 159.77173008310663,
+  "error": 0.004314256079052871,
+  "status": "converged",
+  "n_design_variables": 27,
+  "variant": "default",
+  "extra": {
+   "suite": "sail"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "shooting",
+  "size": 25,
+  "seed": 4,
+  "calls": 250,
+  "seconds": 18.537115700019058,
+  "objective": 159.82808610831563,
+  "error": 0.004668506230214827,
+  "status": "converged",
+  "n_design_variables": 27,
+  "variant": "default",
+  "extra": {
+   "suite": "sail"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "collocation",
+  "size": 25,
+  "seed": 0,
+  "calls": 250,
+  "seconds": 10.177144599991152,
+  "objective": 166.85706803867467,
+  "error": 0.04885220978471526,
+  "status": "budget-exhausted",
+  "n_design_variables": 75,
+  "variant": "default",
+  "extra": {
+   "suite": "sail"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "collocation",
+  "size": 25,
+  "seed": 1,
+  "calls": 216,
+  "seconds": 11.302281500014942,
+  "objective": 162.56273556170663,
+  "error": 0.021858327170319707,
+  "status": "converged",
+  "n_design_variables": 75,
+  "variant": "default",
+  "extra": {
+   "suite": "sail"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "collocation",
+  "size": 25,
+  "seed": 2,
+  "calls": 236,
+  "seconds": 9.043302300007781,
+  "objective": 161.44753780929105,
+  "error": 0.014848269755808984,
+  "status": "converged",
+  "n_design_variables": 75,
+  "variant": "default",
+  "extra": {
+   "suite": "sail"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "collocation",
+  "size": 25,
+  "seed": 3,
+  "calls": 229,
+  "seconds": 9.170854099997086,
+  "objective": 161.59189281146897,
+  "error": 0.015755675506176674,
+  "status": "converged",
+  "n_design_variables": 75,
+  "variant": "default",
+  "extra": {
+   "suite": "sail"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "collocation",
+  "size": 25,
+  "seed": 4,
+  "calls": 250,
+  "seconds": 9.04466610000236,
+  "objective": 161.6542494207956,
+  "error": 0.016147644922010807,
+  "status": "converged",
+  "n_design_variables": 75,
+  "variant": "default",
+  "extra": {
+   "suite": "sail"
+  }
+ }
+]

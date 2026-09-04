@@ -81,3 +81,112 @@ def sample_guesses(count: int, seed: int = 0) -> list[Guess]:
             )
         )
     return guesses
+
+
+SAIL_BOUNDS = {
+    "psi_level": (0.33, 0.66),
+    "psi_slope": (-1.30, -0.68),
+    "t_f": (148.0, 190.0),
+}
+"""The sampled range of each sail guess parameter, in rad and s.
+
+Centred on the polar-derived starting point rather than spread over
+everything the bounds allow: a downwind leg started pointing upwind is not a
+harder instance of the problem, it is a different one. Wider ranges were
+tried first and every start converged to the straight run instead of gybing,
+which measures the strength of that local optimum rather than the optimizer.
+
+Half the sample is mirrored onto the other tack, since gybing north and
+gybing south are equally good and the problem is symmetric between them.
+"""
+
+ALBATROSS_BOUNDS = {
+    "period": (8.5, 11.0),
+    "climb_amplitude": (0.22, 0.32),
+    "airspeed": (26.0, 34.0),
+    "mean_height": (14.0, 21.0),
+}
+"""The sampled range of each albatross guess parameter, in s, rad, m/s and m.
+
+Bounded by what the inverse-dynamics guess can actually fly. A short period
+at high speed and a steep climb asks for more than 90 degrees of bank, which
+is inverted flight and outside the control bounds, so the scenario refuses to
+build before the optimizer ever sees it.
+"""
+
+
+def _scaled(bounds, count, seed):
+    """Draw a Latin hypercube over named bounds.
+
+    Parameters
+    ----------
+    bounds
+        The ``{name: (lower, upper)}`` ranges.
+    count
+        The number of points.
+    seed
+        The seed, which makes the sample reproducible.
+
+    Returns
+    -------
+    list
+        One ``{name: value}`` dictionary per point.
+    """
+    names = list(bounds)
+    unit = qmc.LatinHypercube(d=len(names), seed=seed).random(count)
+    lower = numpy.array([bounds[name][0] for name in names])
+    upper = numpy.array([bounds[name][1] for name in names])
+    return [
+        dict(zip(names, row, strict=True)) for row in lower + unit * (upper - lower)
+    ]
+
+
+def sample_sail_guesses(count: int, seed: int = 0):
+    """Draw starting points for the sail problem.
+
+    Parameters
+    ----------
+    count
+        The number of starting points.
+    seed
+        The seed.
+
+    Returns
+    -------
+    list
+        The starting points.
+    """
+    from gemseo_tempo.problems.sail.problem import Guess as SailGuess
+
+    guesses = []
+    for index, values in enumerate(_scaled(SAIL_BOUNDS, count, seed)):
+        if index % 2:
+            # The other tack: the mark is dead downwind, so gybing either way
+            # is the same problem reflected.
+            values = {
+                "psi_level": -values["psi_level"],
+                "psi_slope": -values["psi_slope"],
+                "t_f": values["t_f"],
+            }
+        guesses.append(SailGuess(**values))
+    return guesses
+
+
+def sample_albatross_guesses(count: int, seed: int = 0):
+    """Draw starting points for the albatross problem.
+
+    Parameters
+    ----------
+    count
+        The number of starting points.
+    seed
+        The seed.
+
+    Returns
+    -------
+    list
+        The starting points.
+    """
+    from gemseo_tempo.problems.albatross.problem import Guess as BirdGuess
+
+    return [BirdGuess(**values) for values in _scaled(ALBATROSS_BOUNDS, count, seed)]

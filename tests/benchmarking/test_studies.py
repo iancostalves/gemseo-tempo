@@ -33,7 +33,6 @@ from gemseo_tempo.benchmarking.runner import CONVERGED
 from gemseo_tempo.benchmarking.runner import FAILED
 from gemseo_tempo.benchmarking.runner import INACCURATE
 from gemseo_tempo.benchmarking.runner import Record
-from gemseo_tempo.benchmarking.runner import build_transcription
 from gemseo_tempo.benchmarking.runner import classify
 from gemseo_tempo.benchmarking.runner import run_one
 from gemseo_tempo.benchmarking.sampling import sample_guesses
@@ -41,6 +40,7 @@ from gemseo_tempo.benchmarking.studies import STUDIES
 from gemseo_tempo.benchmarking.studies import load_records
 from gemseo_tempo.benchmarking.studies import run_study
 from gemseo_tempo.benchmarking.studies import save_records
+from gemseo_tempo.benchmarking.transcriptions import build_transcription
 from gemseo_tempo.problems.brachistochrone import Guess
 from gemseo_tempo.transcriptions import HermiteSimpson
 from gemseo_tempo.transcriptions import IndirectShooting

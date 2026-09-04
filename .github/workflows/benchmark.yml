@@ -1,13 +1,35 @@
 name: benchmark
 
-# Manually triggered benchmarking workflow. Stub until Sprint 10 wires
-# gemseo-benchmark problem groups and report generation.
+# Manually triggered: a full sweep is roughly ninety minutes, which is fine
+# to ask for deliberately and far too slow to put on every push. The smoke
+# mode in the ordinary CI workflow is what keeps this from rotting between
+# runs.
 on:
   workflow_dispatch:
+    inputs:
+      suite:
+        description: Which problem to sweep
+        required: false
+        default: all
+        type: choice
+        options: [all, brachistochrone, sail, albatross]
+      study:
+        description: Which factor to vary
+        required: false
+        default: all
+        type: choice
+        options: [all, transcription, derivative, optimizer]
+      starts:
+        description: Starting points per cell
+        required: false
+        default: "25"
 
 jobs:
   benchmark:
     runs-on: ubuntu-latest
+    # Two hours: the sweep is about ninety minutes and a runner is slower
+    # than a workstation.
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
         with:
@@ -15,7 +37,25 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install with benchmark extras
-        run: pip install -e ".[benchmark]"
-      - name: Run benchmarks (stub)
-        run: echo "Filled in Sprint 10 - benchmarks/run.py"
+      # No benchmark extra: the sweep is native, and gemseo-benchmark cannot
+      # be installed alongside the documentation because it pins sphinx<8.
+      - name: Install
+        run: pip install -e ".[test]"
+      - name: Sweep
+        run: |
+          python examples/benchmark/run_studies.py \
+            --suite "${{ inputs.suite }}" \
+            --study "${{ inputs.study }}" \
+            --starts "${{ inputs.starts }}" \
+            --output benchmark_results
+      - name: Compare against the baselines
+        run: python benchmarks/compare.py --records benchmark_results
+      - name: Upload the figures and records
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: |
+            benchmark_results/*.png
+            benchmark_results/*.json
+          retention-days: 30

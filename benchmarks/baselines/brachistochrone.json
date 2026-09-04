@@ -1,0 +1,496 @@
+[
+ {
+  "study": "transcription",
+  "level": "shooting",
+  "size": 10,
+  "seed": 0,
+  "calls": 31,
+  "seconds": 8.795663400000194,
+  "objective": 0.8243386652904832,
+  "error": 5.032762333107661e-09,
+  "status": "converged",
+  "n_design_variables": 12,
+  "variant": "ideal",
+  "extra": {
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "shooting",
+  "size": 10,
+  "seed": 1,
+  "calls": 66,
+  "seconds": 6.568968400009908,
+  "objective": 0.8243386482167935,
+  "error": 2.5744746760459415e-08,
+  "status": "converged",
+  "n_design_variables": 12,
+  "variant": "ideal",
+  "extra": {
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "shooting",
+  "size": 10,
+  "seed": 2,
+  "calls": 0,
+  "seconds": 1.4077939999988303,
+  "objective": NaN,
+  "error": NaN,
+  "status": "failed",
+  "n_design_variables": 0,
+  "variant": "ideal",
+  "extra": {
+   "error": "ValueError",
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "shooting",
+  "size": 10,
+  "seed": 3,
+  "calls": 25,
+  "seconds": 5.947853699995903,
+  "objective": 0.8243386568693021,
+  "error": 1.5248443579169823e-08,
+  "status": "converged",
+  "n_design_variables": 12,
+  "variant": "ideal",
+  "extra": {
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "shooting",
+  "size": 10,
+  "seed": 4,
+  "calls": 38,
+  "seconds": 6.435414999985369,
+  "objective": 0.8243386615303097,
+  "error": 9.594204911621862e-09,
+  "status": "converged",
+  "n_design_variables": 12,
+  "variant": "ideal",
+  "extra": {
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "shooting",
+  "size": 30,
+  "seed": 0,
+  "calls": 47,
+  "seconds": 8.27165939999395,
+  "objective": 0.8243386106609951,
+  "error": 7.13034470281749e-08,
+  "status": "converged",
+  "n_design_variables": 32,
+  "variant": "ideal",
+  "extra": {
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "shooting",
+  "size": 30,
+  "seed": 1,
+  "calls": 50,
+  "seconds": 6.849223299999721,
+  "objective": 0.8243386685930684,
+  "error": 1.0264172133787965e-09,
+  "status": "converged",
+  "n_design_variables": 32,
+  "variant": "ideal",
+  "extra": {
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "shooting",
+  "size": 30,
+  "seed": 2,
+  "calls": 0,
+  "seconds": 0.9739230000122916,
+  "objective": NaN,
+  "error": NaN,
+  "status": "failed",
+  "n_design_variables": 0,
+  "variant": "ideal",
+  "extra": {
+   "error": "ValueError",
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "shooting",
+  "size": 30,
+  "seed": 3,
+  "calls": 39,
+  "seconds": 7.820856600010302,
+  "objective": 0.8243386604336959,
+  "error": 1.0924500141509658e-08,
+  "status": "converged",
+  "n_design_variables": 32,
+  "variant": "ideal",
+  "extra": {
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "shooting",
+  "size": 30,
+  "seed": 4,
+  "calls": 57,
+  "seconds": 11.737217999994755,
+  "objective": 0.8243386270303437,
+  "error": 5.144589436179589e-08,
+  "status": "converged",
+  "n_design_variables": 32,
+  "variant": "ideal",
+  "extra": {
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "collocation",
+  "size": 10,
+  "seed": 0,
+  "calls": 34,
+  "seconds": 4.133855499996571,
+  "objective": 0.8243387885467022,
+  "error": 1.4448857347035237e-07,
+  "status": "converged",
+  "n_design_variables": 40,
+  "variant": "ideal",
+  "extra": {
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "collocation",
+  "size": 10,
+  "seed": 1,
+  "calls": 37,
+  "seconds": 2.8542001000023447,
+  "objective": 0.8243387749638124,
+  "error": 1.2801125617776103e-07,
+  "status": "converged",
+  "n_design_variables": 40,
+  "variant": "ideal",
+  "extra": {
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "collocation",
+  "size": 10,
+  "seed": 2,
+  "calls": 0,
+  "seconds": 1.744713700027205,
+  "objective": NaN,
+  "error": NaN,
+  "status": "failed",
+  "n_design_variables": 0,
+  "variant": "ideal",
+  "extra": {
+   "error": "ValueError",
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "collocation",
+  "size": 10,
+  "seed": 3,
+  "calls": 29,
+  "seconds": 2.783578000002308,
+  "objective": 0.8243387865443127,
+  "error": 1.4205948752462778e-07,
+  "status": "converged",
+  "n_design_variables": 40,
+  "variant": "ideal",
+  "extra": {
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "collocation",
+  "size": 10,
+  "seed": 4,
+  "calls": 36,
+  "seconds": 2.7100353999994695,
+  "objective": 0.8243387426718791,
+  "error": 8.883811722933218e-08,
+  "status": "converged",
+  "n_design_variables": 40,
+  "variant": "ideal",
+  "extra": {
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "collocation",
+  "size": 30,
+  "seed": 0,
+  "calls": 50,
+  "seconds": 4.279535199981183,
+  "objective": 0.82433867046482,
+  "error": 1.2441928064587264e-09,
+  "status": "converged",
+  "n_design_variables": 120,
+  "variant": "ideal",
+  "extra": {
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "collocation",
+  "size": 30,
+  "seed": 1,
+  "calls": 52,
+  "seconds": 6.052866599988192,
+  "objective": 0.8243386650236437,
+  "error": 5.356463560923328e-09,
+  "status": "converged",
+  "n_design_variables": 120,
+  "variant": "ideal",
+  "extra": {
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "collocation",
+  "size": 30,
+  "seed": 2,
+  "calls": 0,
+  "seconds": 0.9922663999896031,
+  "objective": NaN,
+  "error": NaN,
+  "status": "failed",
+  "n_design_variables": 0,
+  "variant": "ideal",
+  "extra": {
+   "error": "ValueError",
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "collocation",
+  "size": 30,
+  "seed": 3,
+  "calls": 44,
+  "seconds": 1.5526547000044957,
+  "objective": 0.8243386710674447,
+  "error": 1.9752330332950075e-09,
+  "status": "converged",
+  "n_design_variables": 120,
+  "variant": "ideal",
+  "extra": {
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "collocation",
+  "size": 30,
+  "seed": 4,
+  "calls": 53,
+  "seconds": 2.553166700003203,
+  "objective": 0.8243386752829642,
+  "error": 7.089052929557901e-09,
+  "status": "converged",
+  "n_design_variables": 120,
+  "variant": "ideal",
+  "extra": {
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "indirect",
+  "size": 10,
+  "seed": 0,
+  "calls": 0,
+  "seconds": 4.905517500010319,
+  "objective": NaN,
+  "error": NaN,
+  "status": "failed",
+  "n_design_variables": 0,
+  "variant": "ideal",
+  "extra": {
+   "error": "XlaRuntimeError",
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "indirect",
+  "size": 10,
+  "seed": 1,
+  "calls": 0,
+  "seconds": 0.0015742999967187643,
+  "objective": NaN,
+  "error": NaN,
+  "status": "failed",
+  "n_design_variables": 0,
+  "variant": "ideal",
+  "extra": {
+   "error": "ValueError",
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "indirect",
+  "size": 10,
+  "seed": 2,
+  "calls": 0,
+  "seconds": 5.433390899997903,
+  "objective": NaN,
+  "error": NaN,
+  "status": "failed",
+  "n_design_variables": 0,
+  "variant": "ideal",
+  "extra": {
+   "error": "XlaRuntimeError",
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "indirect",
+  "size": 10,
+  "seed": 3,
+  "calls": 0,
+  "seconds": 0.0015645000094082206,
+  "objective": NaN,
+  "error": NaN,
+  "status": "failed",
+  "n_design_variables": 0,
+  "variant": "ideal",
+  "extra": {
+   "error": "ValueError",
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "indirect",
+  "size": 10,
+  "seed": 4,
+  "calls": 0,
+  "seconds": 0.0012215000169817358,
+  "objective": NaN,
+  "error": NaN,
+  "status": "failed",
+  "n_design_variables": 0,
+  "variant": "ideal",
+  "extra": {
+   "error": "ValueError",
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "indirect",
+  "size": 30,
+  "seed": 0,
+  "calls": 0,
+  "seconds": 5.701486300007673,
+  "objective": NaN,
+  "error": NaN,
+  "status": "failed",
+  "n_design_variables": 0,
+  "variant": "ideal",
+  "extra": {
+   "error": "XlaRuntimeError",
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "indirect",
+  "size": 30,
+  "seed": 1,
+  "calls": 0,
+  "seconds": 0.0015233000158332288,
+  "objective": NaN,
+  "error": NaN,
+  "status": "failed",
+  "n_design_variables": 0,
+  "variant": "ideal",
+  "extra": {
+   "error": "ValueError",
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "indirect",
+  "size": 30,
+  "seed": 2,
+  "calls": 0,
+  "seconds": 4.594770399999106,
+  "objective": NaN,
+  "error": NaN,
+  "status": "failed",
+  "n_design_variables": 0,
+  "variant": "ideal",
+  "extra": {
+   "error": "XlaRuntimeError",
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "indirect",
+  "size": 30,
+  "seed": 3,
+  "calls": 0,
+  "seconds": 0.001492999988840893,
+  "objective": NaN,
+  "error": NaN,
+  "status": "failed",
+  "n_design_variables": 0,
+  "variant": "ideal",
+  "extra": {
+   "error": "ValueError",
+   "suite": "brachistochrone"
+  }
+ },
+ {
+  "study": "transcription",
+  "level": "indirect",
+  "size": 30,
+  "seed": 4,
+  "calls": 0,
+  "seconds": 0.0012168000102974474,
+  "objective": NaN,
+  "error": NaN,
+  "status": "failed",
+  "n_design_variables": 0,
+  "variant": "ideal",
+  "extra": {
+   "error": "ValueError",
+   "suite": "brachistochrone"
+  }
+ }
+]

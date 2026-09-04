@@ -37,3 +37,10 @@ jobs:
         run: |
           coverage run -m pytest
           coverage report --show-missing
+      # A few cells of every benchmark suite, so the wrappers cannot rot
+      # between the manual sweeps. One Python version is enough: this checks
+      # that the code still runs, not how fast it is.
+      - name: Benchmark smoke
+        if: matrix.python-version == '3.11'
+        run: |
+          python examples/benchmark/run_studies.py --smoke --suite all             --output benchmark_smoke
