@@ -22,7 +22,11 @@ import pytest
 
 from gemseo_tempo.problems.albatross import create_codesign_optimization
 from gemseo_tempo.problems.albatross.problem import WING_BOUNDS
+from gemseo_tempo.problems.albatross.sequential import CRUISE_WEIGHTS
+from gemseo_tempo.problems.albatross.sequential import DYNAMICS_WEIGHTS
 from gemseo_tempo.problems.albatross.sequential import Sensitivity
+from gemseo_tempo.problems.albatross.sequential import compare_sizing_routes
+from gemseo_tempo.problems.albatross.sequential import cross_country_time
 from gemseo_tempo.problems.albatross.sequential import glide_ratio
 from gemseo_tempo.problems.albatross.sequential import minimum_wind
 from gemseo_tempo.problems.albatross.sequential import misalignment_study
@@ -30,6 +34,7 @@ from gemseo_tempo.problems.albatross.sequential import sensitivity_study
 from gemseo_tempo.problems.albatross.sequential import sequential_codesign
 from gemseo_tempo.problems.albatross.sequential import size_the_wing
 from gemseo_tempo.problems.albatross.sequential import total_mass
+from gemseo_tempo.problems.albatross.sequential import turn_capability
 from gemseo_tempo.problems.albatross.sequential import weights_from
 
 logging.disable(logging.CRITICAL)
@@ -38,11 +43,25 @@ SIZE = 10
 """The discretization of these tests, kept small: they re-fly the bird a lot."""
 
 MEASURED = {
-    "glide_ratio": Sensitivity("glide_ratio", 19.75, -1.117),
-    "mass": Sensitivity("mass", 8.50, -0.0045),
-    "cl_max": Sensitivity("cl_max", 1.50, 0.5312),
+    "glide_ratio": Sensitivity("glide_ratio", 19.75, -0.986),
+    "mass": Sensitivity("mass", 8.50, 0.0441),
+    "cl_max": Sensitivity("cl_max", 1.50, 0.6179),
 }
 """Elasticities measured at ``size=12``, so the tests below need not re-run them."""
+
+
+def _simultaneous_wing():
+    """Return the wing the simultaneous co-design run settles on.
+
+    Returns
+    -------
+    dict
+        The wing area, span and section.
+    """
+    _, gemseo_scenario = create_codesign_optimization(size=SIZE)
+    gemseo_scenario.execute(algo_name="SLSQP", max_iter=600)
+    optimum = gemseo_scenario.optimization_result.x_opt_as_dict
+    return {name: float(optimum["constant." + name][0]) for name in WING_BOUNDS}
 
 
 @pytest.fixture(scope="module")
@@ -89,16 +108,57 @@ def test_the_sizing_step_returns_a_wing_inside_its_bounds():
     assert glide_ratio(wing) > glide_ratio(None)
 
 
-def test_sequential_matches_simultaneous_when_the_merit_is_right(simultaneous):
-    """Sizing first costs nothing when it is sized for the right thing.
+def test_the_two_sizing_routes_pick_different_birds(simultaneous):
+    """Sizing for cruise and for turning gives two quite different wings.
 
-    This is the result rather than the expected 2 percent margin. Both
-    routes reach the same wing, because the figure of merit the sizing step
-    was given is the one the mission actually rewards.
+    Conventional practice sizes for cruise without saying so, and the wing
+    that comes out is a glider: all the span it is allowed, the thinnest
+    section, and almost no capacity to turn. Sizing for the manoeuvre
+    instead gives the opposite bird.
     """
-    wing = size_the_wing(weights_from(MEASURED))
-    sequential = minimum_wind(wing, SIZE, 600)
-    assert sequential == pytest.approx(simultaneous, rel=0.02)
+    cruise = size_the_wing(CRUISE_WEIGHTS)
+    dynamics = size_the_wing(DYNAMICS_WEIGHTS)
+    assert glide_ratio(cruise) > glide_ratio(dynamics)
+    assert turn_capability(dynamics) > 2.0 * turn_capability(cruise)
+    assert cruise["wing_area"] < dynamics["wing_area"]
+
+
+def test_co_design_beats_both_sizing_routes_on_both_missions(simultaneous):
+    """Neither merit reproduces the co-design wing, on either mission.
+
+    This is the argument for optimizing the wing and the cycle together,
+    and it is stronger than a weighting being mis-set. Sizing for cruise is
+    close on minimum wind, which is a cruise-like objective, and loses more
+    on the crossing. Sizing for the manoeuvre loses heavily on both.
+    """
+    reference_time = cross_country_time(_simultaneous_wing(), SIZE, 500)
+    for weights in (CRUISE_WEIGHTS, DYNAMICS_WEIGHTS):
+        wing = size_the_wing(weights)
+        assert minimum_wind(wing, SIZE, 500) > simultaneous
+        assert cross_country_time(wing, SIZE, 500) > reference_time
+
+
+def test_the_sizing_merit_can_only_land_on_a_corner():
+    """No weighting reaches the co-design wing, and here is why.
+
+    The vehicle merit is close to linear in the normalized quantities over
+    a box, so its optimum sits at a vertex and jumps between vertices as the
+    weights move. The mission's optimum is interior. That is a structural
+    reason a sequential route cannot match co-design here, rather than a
+    matter of tuning: the wing area the co-design run settles on is not
+    available to any weighting.
+    """
+    areas = {
+        size_the_wing({"glide_ratio": 1.0, "mass": 0.0, "turn": weight})["wing_area"]
+        for weight in (0.0, 0.2, 0.4, 1.0)
+    }
+    lower, upper = WING_BOUNDS["wing_area"]
+    # Every sized wing sits on one bound or the other, never between them.
+    for area in areas:
+        assert min(abs(area - lower), abs(area - upper)) < 1e-3
+    # The co-design wing does not.
+    interior = _simultaneous_wing()["wing_area"]
+    assert lower + 1e-3 < interior < upper - 1e-3
 
 
 def test_sizing_for_the_wrong_thing_costs_a_great_deal(simultaneous):
@@ -107,8 +167,7 @@ def test_sizing_for_the_wrong_thing_costs_a_great_deal(simultaneous):
         [0.5, 4.0], reference_wind=simultaneous, size=SIZE, max_iter=400
     )
     aligned, misaligned = study
-    assert aligned.penalty < 0.05
-    assert misaligned.penalty > 0.3
+    assert misaligned.penalty > aligned.penalty + 0.3
     assert total_mass(misaligned.wing) < total_mass(aligned.wing)
     assert glide_ratio(misaligned.wing) < glide_ratio(aligned.wing)
 
@@ -118,4 +177,18 @@ def test_the_whole_route_reports_every_step():
     result = sequential_codesign(size=8, relative_step=0.1, max_iter=250)
     assert set(result.sensitivities) == {"glide_ratio", "mass", "cl_max"}
     assert set(result.wing) == set(WING_BOUNDS)
-    assert 4.0 < result.minimum_wind < 16.0
+    assert 4.0 < result.minimum_wind < 20.0
+
+
+def test_comparing_the_routes_reports_both_missions():
+    """The whole two-by-two in one call, cruise first."""
+    routes = compare_sizing_routes(size=8, max_iter=250)
+    assert [route.name for route in routes] == ["cruise", "dynamics"]
+    for route in routes:
+        assert set(route.wing) == set(WING_BOUNDS)
+        assert route.minimum_wind > 0.0
+        assert route.cross_country_time > 0.0
+    cruise, dynamics = routes
+    # The cruise wing glides better; the dynamics wing turns harder.
+    assert glide_ratio(cruise.wing) > glide_ratio(dynamics.wing)
+    assert turn_capability(dynamics.wing) > turn_capability(cruise.wing)

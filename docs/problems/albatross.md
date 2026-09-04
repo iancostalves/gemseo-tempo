@@ -15,7 +15,7 @@ from gemseo_tempo.problems.albatross import create_codesign_optimization
 
 scenario, gemseo_scenario = create_codesign_optimization(size=20)
 gemseo_scenario.execute(algo_name="SLSQP", max_iter=500)
-print(gemseo_scenario.optimization_result.f_opt)  # about 7.9 m/s
+print(gemseo_scenario.optimization_result.f_opt)  # about 8.6 m/s
 ```
 
 ## The bird
@@ -30,7 +30,7 @@ dy/dt = V cos(gamma) sin(psi)
 dh/dt = V sin(gamma)
 ```
 
-The wing comes from a four-model statics chain rather than a table of
+The wing comes from a five-model statics chain rather than a table of
 constants, so the design variables reach the equations of motion through
 quantities that mean something:
 
@@ -38,6 +38,7 @@ quantities that mean something:
 | --- | --- | --- |
 | `AirfoilSection` | section | zero-lift drag `C_D0`, `C_L,max` |
 | `WingGeometry` | area, span, Oswald efficiency | aspect ratio, induced factor `k` |
+| `FiniteWing` | plan, aspect ratio, section properties | chord, Reynolds, `C_D0`, `C_L,max` |
 | `StructuralMass` | body mass, area, aspect ratio | wing mass, total mass |
 | `FlightEnvelope` | mass, area, `C_L,max` | wing loading, stall speed |
 
@@ -71,6 +72,44 @@ to maximum lift came out **exactly zero**, which reads like a physical finding
 and was an artefact of the wiring. The lift limit is now a path constraint
 tied to the wing, and the optimized cycle sits on it for most of its length,
 which makes it the most active constraint in the problem.
+
+### Aspect ratio reaches the maximum lift too
+
+Aspect ratio is not only an induced-drag story, and modelling it as one is
+what let the optimizer ask for a sailplane. `FiniteWing` adds the other half,
+in two layers that pull opposite ways.
+
+**The lift-curve slope.** A finite wing flies in its own downwash, so it needs
+a larger angle than the section to reach a given lift coefficient:
+`a = a0 / (1 + a0 / (pi e AR))`. A longer wing suffers less of that and holds a
+little more lift. Across the aspect ratios here it is worth about 4%: real,
+and far too small to carry the argument.
+
+**The Reynolds number, which is what bites.** The mean chord is `S / b`, so at
+fixed area a longer wing is a narrower one, and a narrower wing flies slower
+in Reynolds terms. Across the design box the chord runs 0.135 m to 0.360 m and
+the Reynolds number 1.8e5 to 4.9e5, which is exactly where a wing starts
+losing maximum lift and gaining profile drag:
+
+| Reynolds | `C_D0` | `C_L,max` |
+| --- | --- | --- |
+| 1.5e5 | ×1.23 | ×0.80 |
+| 1.8e5 (high-AR corner) | ×1.13 | ×0.88 |
+| 2.5e5 (nominal) | ×1.00 | ×1.00 |
+| 3.5e5 | ×0.87 | ×1.12 |
+
+`C_D0` scales as `Re^-0.4`, between the laminar `-0.5` and turbulent `-0.2`,
+and `C_L,max` saturates as `Re / (Re + Re_half)`. Both are calibrated choices
+rather than derivations, and both are normalized at the nominal bird so it
+keeps its section properties exactly. This is the standard reason small flyers
+cannot use sailplane aspect ratios.
+
+The effect on the answer is the point. Through two earlier passes **every**
+wing variable sat on a bound, because nothing charged aspect ratio for
+anything but structure, and a wing mass law was not enough to stop it even at
+7.6 kg of wing on a 14 kg bird. With the chord penalty in place the wing area
+settles at 0.628 m2, between its limits, and the aspect ratio drops from 27.4
+to 21.8.
 
 ## The wind
 
@@ -162,17 +201,17 @@ shows up as airspeed. Sweeping the wind, over a nine-second cycle:
 
 | `w_ref` (m/s) | drag work (m) | gradient work (m) | net (m) |
 | --- | --- | --- | --- |
-| 0 | −18.32 | 0.00 | −18.29 |
-| 8 | −32.11 | +16.29 | −15.64 |
-| 12 | −38.55 | +28.87 | −9.64 |
-| 16 | −45.25 | +42.02 | −3.05 |
-| 18 | −50.45 | +50.86 | **+0.45** |
-| 22 | −59.26 | +66.85 | +7.58 |
-| 26 | −67.58 | +82.43 | +14.90 |
+| 0 | −18.16 | 0.00 | −18.13 |
+| 8 | −31.56 | +15.60 | −15.67 |
+| 12 | −38.04 | +28.20 | −9.78 |
+| 16 | −44.58 | +41.27 | −3.26 |
+| 18 | −50.69 | +51.13 | **+0.13** |
+| 22 | −58.32 | +65.93 | +7.26 |
+| 26 | −68.04 | +81.87 | +14.44 |
 
-With no wind the cycle is a pure glide and loses 18.3 m of specific energy,
+With no wind the cycle is a pure glide and loses 18.1 m of specific energy,
 all of it to drag. As the wind strengthens the gradient work grows faster than
-the drag does, and the two cross at **`w_ref` = 17.7 m/s**: below that the
+the drag does, and the two cross at **`w_ref` = 17.9 m/s**: below that the
 prescribed cycle cannot sustain itself, above it the bird gains.
 
 ## Formulation C: what is the weakest wind it could live in?
@@ -185,12 +224,13 @@ and the objective is the wind itself.
 | --- | --- |
 | nothing (formulation A's fixed cycle) | 17.7 m/s |
 | the cycle, its duration and its start | 10.18 m/s |
-| all of that plus the wing | **7.87 m/s** |
+| all of that plus the wing | **8.65 m/s** |
 
 Letting the optimizer choose the cycle rather than fly a prescribed one is
-worth 42%. Adding the wing to the problem is worth a further **23%**, at
-0.50 m² spanning 3.70 m and the thinnest section available: an aspect ratio of
-27.4, a glide ratio of 27.8, and 9.8 kg of bird.
+worth 43%. Adding the wing to the problem is worth a further **15%**, at
+0.50 m² 0.628 m2 spanning 3.70 m and the thinnest section available: an aspect ratio
+of 21.8, a glide ratio of 24.3, and 9.1 kg of bird. The area is the first wing
+variable in three passes to settle between its bounds rather than on one.
 
 The 10.18 m/s figure is the one to compare against the literature, since it is
 the real bird's wing: published estimates of the wind an albatross needs sit
@@ -233,57 +273,6 @@ per segment, and a path constraint is one name covering a value per save
 point, so a problem that reads as a handful of lines is a few hundred scalars
 by the time the optimizer sees it. Note also that `state.h` has one fewer
 component under A than under C: A pins its initial state, C frees it.
-
-## Formulation B: size the bird, then fly it
-
-Formulation C optimizes the wing and the cycle at once. That is not how the
-work is usually organized: in practice the vehicle is settled first, against
-figures of merit an engineer can reason about, and only then is a trajectory
-flown on it. Formulation B is that route, in three steps.
-
-**First, measure what the mission cares about.** Each vehicle-level figure of
-merit is nudged and the mission **re-optimized**, so what is recorded is the
-real effect rather than a linearization:
-
-| figure of merit | moved through | baseline | elasticity |
-| --- | --- | --- | --- |
-| best glide ratio | `oswald` | 19.75 | **-1.117** |
-| `C_L,max` | `section` | 1.50 | +0.531 |
-| mass | `body_mass` | 8.50 | -0.005 |
-
-Glide ratio dominates, and nearly proportionally: 1% more of it buys 0.94%
-less wind. Mass barely registers. `C_L,max` is *positive*, which is the trade
-made visible: reaching more of it means a thicker section, and for a mission
-that only wants the weakest wind, the drag that costs outweighs the lift it
-buys.
-
-**Then choose a wing** against those elasticities as weights, with no
-trajectory in sight, which is exactly what a designer does. **Then fly it.**
-
-### Sequential and simultaneous agree here
-
-| route | minimum `w_ref` |
-| --- | --- |
-| sequential: size, then fly | 7.87 m/s |
-| simultaneous co-design | 7.87 m/s |
-
-They pick the same bird. That is not the 2% margin the sprint expected, and it
-is the more useful result: **co-design is worth exactly the misalignment
-between the figure of merit and the mission**, and when the merit is measured
-against the mission rather than assumed, there is none left to recover.
-
-What it costs to get that merit wrong is worth quantifying, since a designer
-has every reason to weight mass more heavily than this mission does:
-
-| weight on mass | aspect ratio | glide ratio | mass | minimum `w_ref` | penalty |
-| --- | --- | --- | --- | --- | --- |
-| 0.07 (measured) | 27.4 | 24.2 | 9.80 kg | 8.89 m/s | 0% |
-| 1.0 | 26.4 | 23.8 | 9.62 kg | 9.00 m/s | +1.3% |
-| 2.0 | 13.2 | 16.8 | 7.54 kg | 12.22 m/s | +37% |
-| 4.0 | 7.8 | 13.0 | 7.06 kg | 15.40 m/s | +73% |
-
-Sequential design is not worse than co-design because it is sequential. It is
-worse when it is sized for the wrong thing.
 
 ## What the bird is flying for
 
@@ -349,6 +338,105 @@ converges to a cycle that loses nearly 10 m. Forced to close in speed as well
 it does find a neutral cycle, covering 94% of what the loop manages, so what
 fails in the first case is the search rather than the topology.
 
+## Formulation B: what did you size it for?
+
+Formulation C optimizes the wing and the cycle at once. That is not how the
+work is usually organized: the vehicle is settled first, against figures of
+merit an engineer can reason about, and only then is a trajectory flown on it.
+Formulation B is that route, and it comes in two versions, because the merit
+you pick is an assumption about the mission whether you write it down or not.
+
+**B-cruise** sizes for the glide ratio alone. This is what conventional
+practice does when nobody states the assumption: the best-gliding wing is
+taken to be the best wing.
+
+**B-dynamics** sizes for gliding *and* turning, using a proxy computable from
+the wing alone so it never flies the cycle: the load factor the wing can pull
+at a reference airspeed, `n = 0.5 rho V^2 S C_L,max / (m g)`, which is what
+sets the minimum turn radius. The two terms carry equal weight, which is a
+modelling choice and is stated as one.
+
+Each is then flown on **both** missions, against simultaneous co-design:
+
+| sized for | area | AR | glide | `n_max` | min wind | vs C | crossing | vs C |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| cruise | 0.500 | 27.4 | 26.0 | 1.38 | 8.90 | +2.9% | 8.48 s | +6.5% |
+| dynamics | 0.900 | 9.7 | 14.2 | 5.84 | 14.00 | +61.8% | 11.13 s | +39.8% |
+| best blend | 0.900 | 15.2 | 21.8 | 3.47 | 9.15 | +5.8% | 8.26 s | +3.7% |
+| **co-design** | **0.628** | 21.8 | 24.3 | 2.02 | **8.65** | ref | **7.96 s** | ref |
+
+Three things fall out of that table.
+
+**Cruise sizing is nearly right for the wrong reason.** Minimum wind is a
+cruise-like objective, so a wing sized for gliding is only 2.9% off it. Ask
+the same bird to *get somewhere* and the gap more than doubles. The assumption
+that cruise is the goal is invisible until the mission stops being cruise.
+
+**Sizing hard for the manoeuvre is far worse than sizing for cruise.** The
+equal-weighted proxy produces a stubby, thick-sectioned bird that turns
+beautifully and glides at 14. Turning matters, but not that much, and a proxy
+has no way of knowing how much.
+
+**No weighting reaches the co-design wing at all.** This is the part that
+makes the argument structural rather than a matter of tuning. The vehicle
+merit is close to linear in its normalized quantities over a box, so its
+optimum sits at a **vertex** and jumps between vertices as the weights move:
+the area goes 0.500, 0.500, 0.900, 0.900 as the turn weight is swept, never
+stopping in between. The mission's optimum is **interior**, at 0.628. There is
+no weight that lands there, so no amount of hindsight would let the sequential
+route reproduce the co-design answer.
+
+## Are these optima real?
+
+Every number above comes from one inverse-dynamics guess, which is a strong
+start and therefore a suspicious one. GEMSEO's `MultiStart` over a Latin
+hypercube is the check:
+
+| start | minimum `w_ref` |
+| --- | --- |
+| seeded, inverse dynamics | 8.6486 m/s |
+| four random starts | 8.6400 m/s |
+
+Random search does slightly better, by 0.10%, so the seeded optimum is
+marginally local. The margin is small enough that the basin is clearly broad
+rather than the guess being wrong, and it is reported rather than tidied away.
+
+## Weaker wind or a faster crossing
+
+The two things a soaring bird might want cannot both be had, and mNBI draws
+the trade directly rather than scalarizing it. Over a 300 m crossing:
+
+| `w_ref` needed | crossing time | cross-country speed |
+| --- | --- | --- |
+| 10.97 m/s | 15.56 s | 19.3 m/s |
+| 12.06 m/s | 11.91 s | 25.2 m/s |
+| 16.45 m/s | 9.41 s | 31.9 m/s |
+| 23.06 m/s | 7.67 s | 39.1 m/s |
+| 31.14 m/s | 6.45 s | 46.5 m/s |
+| 40.00 m/s | 5.50 s | 54.6 m/s |
+
+The low end is worth a second look: **10.97 m/s to cross 300 m per cycle,
+against 8.65 m/s merely to sustain one.** Covering ground costs more than
+staying airborne, which is the difference between a bird that survives a calm
+and a bird that gets anywhere. `plot_pareto` draws the curve; anything marked
+on it has to be measured in the same two objectives, since a minimum wind
+taken without a distance requirement is a different quantity and will appear
+to dominate the front.
+
+## The time budget
+
+The sprint asks for formulation C under five minutes on one core with
+fixed-step integration. It is not close:
+
+| integration | minimum `w_ref` | time |
+| --- | --- | --- |
+| adaptive, rtol 1e-8 | 8.6332 m/s | 6.6 s |
+| fixed step, 1/200 | 8.6332 m/s | 3.7 s |
+
+Identical answers, and fixed stepping is the faster of the two, because an
+adaptive controller spends steps chasing a tolerance the optimizer never asked
+for. Eighty times inside the budget.
+
 ## Three things that had to be got right
 
 **A heading is periodic only modulo a turn.** A loop comes back to the same
@@ -370,18 +458,25 @@ disciplines then agree to 1e-3.
 
 ## Still open
 
-**The wing still wants all the span it is allowed.** Aspect ratio raises the
-glide ratio, the glide ratio dominates every mission measured here, and
-nothing in the model bites hard enough to stop it: a structural law growing as
-the square root of aspect ratio changed nothing, and the bending law
-`AR^1.5 sqrt(S)` still leaves the optimizer on its bound at 7.6 kg of wing on
-a 14 kg bird. Only the section trade produces an interior optimum, and only
-for the cross-country missions. The area and span bounds are therefore the
-observed range of a real wandering albatross, so that an active bound at least
-means something. What actually limits a real bird's span is not in this model.
+**The span still wants everything it is allowed**, even though the area no
+longer does. Aspect ratio is bought two ways here, by lengthening the span and
+by shrinking the area, and only the second now carries a penalty: a smaller
+area means a smaller chord and a worse Reynolds number, which is what pulled
+the area off its bound. A longer span at fixed area does the same thing to the
+chord, so the two are not independent, and what actually limits a real bird's
+span, structural and otherwise, is still not in this model.
+
+**The wing mass law barely matters.** Growing as the square root of aspect
+ratio it changed nothing at all, and the bending law `AR^1.5 sqrt(S)` moves
+the answer far less than the Reynolds penalty does. The interesting physics
+here turned out to be aerodynamic rather than structural, which was not the
+expectation going in.
 
 ## Reproducing everything here
 
 ```bash
 python examples/albatross/run_albatross.py --output figures/albatross
 ```
+
+Every number on this page is measured at 16 collocation segments unless the
+table says otherwise, with the model as of the third pass of Sprint 9.

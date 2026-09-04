@@ -59,6 +59,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import jax.numpy as jnp
+import numpy
 
 from gemseo_tempo.dynamics.controls import CubicControl
 from gemseo_tempo.dynamics.integrators import DiffraxIntegrator
@@ -504,6 +505,8 @@ def create_codesign_scenario(
     size: int = 20,
     guess: Guess | None = None,
     design: dict[str, float] | None = None,
+    integrator=None,
+    target_distance: float | None = None,
 ) -> DynamicScenario:
     """Build the minimum-wind, energy-neutral cycle.
 
@@ -523,6 +526,15 @@ def create_codesign_scenario(
         The starting cycle.
     design
         Overrides of :data:`.DESIGN_DEFAULTS`.
+    integrator
+        The integrator; an adaptive one when omitted. A fixed step makes the
+        run time predictable, which is what a CI budget needs.
+    target_distance
+        A ground distance to cover, in m. Naming one turns the single
+        objective into two, the wind and the time taken, and adds the
+        terminal constraint that the distance is actually covered. That is
+        the trade a Pareto front is drawn over: a bird that will accept
+        more wind can cross faster.
 
     Returns
     -------
@@ -535,6 +547,21 @@ def create_codesign_scenario(
     state_space = create_state_space()
     transcription = transcription or HermiteSimpson(num_segments=size)
 
+    if target_distance is None:
+        objective = Mayer("w_ref_objective", lambda t_final, s1, th: th["w_ref"])
+        crossing = ()
+    else:
+        objective = Mayer(
+            "performance",
+            lambda t_final, s1, th: jnp.stack([jnp.reshape(th["w_ref"], ()), t_final]),
+        )
+        crossing = (
+            TerminalConstraint(
+                "distance_target",
+                lambda t_final, s1, th: s1["x"] - target_distance,
+            ),
+        )
+
     # The duration is free, so the cycle is parameterized on [0, 1].
     normalized = jnp.linspace(0.0, 1.0, size + 1)
     boundary = BoundarySpec(
@@ -545,14 +572,16 @@ def create_codesign_scenario(
     )
     scenario = DynamicScenario(
         state_space=state_space,
-        integrator=DiffraxIntegrator(rtol=1e-8, atol=1e-8, n_save=size + 1),
+        integrator=integrator
+        or DiffraxIntegrator(rtol=1e-8, atol=1e-8, n_save=size + 1),
         controls=_controls(normalized, controls),
-        functionals=(Mayer("w_ref_objective", lambda t_final, s1, th: th["w_ref"]),),
+        functionals=(objective,),
         constraints=(
             PeriodicityConstraint(
                 "cycle", ["h", "V", "gamma", "psi"], offsets={"psi": TURN}
             ),
             *_path_constraints(),
+            *crossing,
         ),
         boundary=boundary,
         transcription=transcription,
@@ -694,6 +723,8 @@ def create_codesign_optimization(
     guess: Guess | None = None,
     design: dict[str, float] | None = None,
     design_names: Sequence[str] = ("w_ref", "wing_area", "wing_span", "section"),
+    integrator=None,
+    target_distance: float | None = None,
 ):
     """Build the GEMSEO scenario of the minimum-wind cycle.
 
@@ -718,13 +749,76 @@ def create_codesign_optimization(
     tuple
         The :class:`.DynamicScenario` and the GEMSEO scenario on it.
     """
-    scenario = create_codesign_scenario(transcription, size, guess, design)
+    scenario = create_codesign_scenario(
+        transcription, size, guess, design, integrator, target_distance
+    )
     bounds = _bounds(scenario)
     bounds["constant.w_ref"] = WIND_BOUNDS
     for name, limits in WING_BOUNDS.items():
         bounds[CONSTANT_PREFIX + name] = limits
     formulation = ControlAndDesign(scenario, list(design_names), bounds=bounds)
     return scenario, formulation.create_gemseo_scenario()
+
+
+def solve_pareto_front(
+    size: int = 12,
+    target_distance: float = 300.0,
+    n_points: int = 6,
+    sub_optim_max_iter: int = 250,
+):
+    """Trade the weakest wind against the fastest crossing.
+
+    Two things a soaring bird might want, which cannot both be had. A cycle
+    that merely sustains itself can do so in very little wind but goes
+    nowhere in a hurry; crossing the same ground faster means accepting
+    stronger wind. The front is drawn with mNBI, which solves a
+    sub-optimization per point rather than scalarizing, so the curve is the
+    real trade rather than a weighted-sum sample of it.
+
+    Parameters
+    ----------
+    size
+        The discretization.
+    target_distance
+        The ground distance each cycle must cover, in m.
+    n_points
+        The number of Pareto points requested.
+    sub_optim_max_iter
+        The iteration budget of each sub-optimization.
+
+    Returns
+    -------
+    ndarray
+        The distinct Pareto points as rows of ``[w_ref, crossing time]``,
+        sorted by wind.
+    """
+    from gemseo.algos.pareto.pareto_front import ParetoFront
+
+    _, gemseo_scenario = create_codesign_optimization(
+        size=size, target_distance=target_distance
+    )
+    gemseo_scenario.execute(
+        algo_name="MNBI",
+        n_sub_optim=n_points,
+        sub_optim_algo="SLSQP",
+        sub_optim_max_iter=sub_optim_max_iter,
+        max_iter=20000,
+    )
+    front = ParetoFront.from_optimization_problem(
+        gemseo_scenario.formulation.optimization_problem
+    )
+    points = numpy.asarray(front.f_optima)
+    # mNBI returns each anchor several times, and the repeats differ in the
+    # last few digits rather than exactly, so they have to be clustered
+    # rather than deduplicated. Walking the sorted list and keeping a point
+    # only when it has moved by more than a tolerance leaves the curve.
+    ordered = points[numpy.argsort(points[:, 0])]
+    kept = [ordered[0]]
+    for candidate in ordered[1:]:
+        moved = abs(candidate[0] - kept[-1][0]) / max(abs(kept[-1][0]), 1.0)
+        if moved > 1e-3:
+            kept.append(candidate)
+    return numpy.asarray(kept)
 
 
 def _bounds(scenario) -> dict[str, tuple[float, float]]:
@@ -750,6 +844,17 @@ def _bounds(scenario) -> dict[str, tuple[float, float]]:
             bounds[name] = (MIN_HEIGHT, 200.0)
         elif name.startswith("state.V"):
             bounds[name] = (10.0, 80.0)
+        elif name.startswith(("state.x", "state.y")):
+            # A cycle covers a few hundred metres, so these are generous
+            # rather than binding. They exist because a design space with
+            # unbounded components cannot be sampled, which is what
+            # multi-start needs to do.
+            bounds[name] = (-3000.0, 3000.0)
+        elif name.startswith("state.gamma"):
+            bounds[name] = (-0.5 * float(jnp.pi), 0.5 * float(jnp.pi))
+        elif name.startswith("state.psi"):
+            # Wide enough for a loop to wind through a full turn either way.
+            bounds[name] = (-4.0 * float(jnp.pi), 4.0 * float(jnp.pi))
         elif name == "t_f":
             bounds[name] = (3.0, 30.0)
     return bounds
@@ -798,4 +903,5 @@ __all__ = [
     "gliding_baseline",
     "optimal_trajectory",
     "soaring_cycle",
+    "solve_pareto_front",
 ]

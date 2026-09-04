@@ -428,3 +428,39 @@ def plot_section_trade(axes=None):
     lift_axis.tick_params(axis="y", labelcolor="tab:red")
     axes.set_title("Cruise against manoeuvre: the two cannot be had at once")
     return axes
+
+
+def plot_pareto(points, wings=None, axes=None):
+    """Draw the trade between the weakest wind and the fastest crossing.
+
+    Parameters
+    ----------
+    points
+        Rows of ``[w_ref, crossing time]``, as
+        :func:`.solve_pareto_front` returns them.
+    wings
+        Optional ``{label: (w_ref, time)}`` of particular designs to mark on
+        the curve. The points must be in the **same** two objectives as the
+        front, that is the wind each design needs to cover the same distance
+        and the time it then takes. A minimum wind measured without a
+        distance requirement is a different quantity and will appear to
+        dominate the front, which is a plotting error rather than a result.
+    axes
+        The axis to draw on; a new one when omitted.
+
+    Returns
+    -------
+    Axes
+        The axis drawn on.
+    """
+    if axes is None:
+        _, axes = pyplot.subplots(figsize=(7.0, 4.5))
+    points = numpy.asarray(points)
+    axes.plot(points[:, 0], points[:, 1], "o-", color="tab:blue", label="Pareto front")
+    for label, (wind, time) in (wings or {}).items():
+        axes.plot(wind, time, "*", markersize=14, label=label)
+    axes.set_xlabel("reference wind the bird needs (m/s)")
+    axes.set_ylabel("time to cross (s)")
+    axes.set_title("Weaker wind or a faster crossing, not both")
+    axes.legend(loc="best", fontsize="small")
+    return axes

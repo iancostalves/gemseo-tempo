@@ -39,11 +39,16 @@ from gemseo_tempo.problems.albatross import optimal_trajectory
 from gemseo_tempo.problems.albatross import plot_controls
 from gemseo_tempo.problems.albatross import plot_energy
 from gemseo_tempo.problems.albatross import plot_energy_analysis
+from gemseo_tempo.problems.albatross import plot_pareto
 from gemseo_tempo.problems.albatross import plot_polar
 from gemseo_tempo.problems.albatross import plot_section_trade
 from gemseo_tempo.problems.albatross import plot_trajectory
 from gemseo_tempo.problems.albatross import plot_wind_profile
+from gemseo_tempo.problems.albatross import solve_pareto_front
+from gemseo_tempo.problems.albatross.sequential import compare_sizing_routes
+from gemseo_tempo.problems.albatross.sequential import glide_ratio
 from gemseo_tempo.problems.albatross.sequential import sequential_codesign
+from gemseo_tempo.problems.albatross.sequential import turn_capability
 from gemseo_tempo.scenario.description import describe_problem
 
 WIND_SWEEP = (0.0, 8.0, 12.0, 16.0, 18.0, 22.0, 26.0)
@@ -223,6 +228,48 @@ def run_sequential(size: int = 20) -> None:
     print(f"sequential minimum wind: {result.minimum_wind:.3f} m/s")
 
 
+def run_sizing_routes(size: int = 16) -> None:
+    """Size a wing for cruise and for turning, and fly both.
+
+    Parameters
+    ----------
+    size
+        The discretization.
+    """
+    print("")
+    print("=== what did you size it for? ===")
+    print(
+        f"{'sized for':>10} {'AR':>6} {'glide':>6} {'n_max':>6}"
+        f" {'min wind':>9} {'crossing':>9}"
+    )
+    for route in compare_sizing_routes(size=size):
+        aspect = route.wing["wing_span"] ** 2 / route.wing["wing_area"]
+        print(
+            f"{route.name:>10} {aspect:6.2f} {glide_ratio(route.wing):6.2f}"
+            f" {turn_capability(route.wing):6.2f} {route.minimum_wind:9.3f}"
+            f" {route.cross_country_time:9.3f}"
+        )
+
+
+def run_pareto(output: Path, size: int = 12) -> None:
+    """Draw the trade between the weakest wind and the fastest crossing.
+
+    Parameters
+    ----------
+    output
+        The directory to write into.
+    size
+        The discretization.
+    """
+    front = solve_pareto_front(size=size, target_distance=300.0, n_points=6)
+    print("")
+    print("=== weaker wind or a faster crossing ===")
+    print(f"{'w_ref':>8} {'crossing':>9} {'speed':>8}")
+    for wind, crossing in front:
+        print(f"{wind:8.2f} {crossing:9.2f} {300.0 / crossing:8.2f}")
+    _save(plot_pareto(front).figure, output / "pareto.png")
+
+
 def main() -> None:
     """Run every formulation and write the figures."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -237,6 +284,8 @@ def main() -> None:
     simultaneous = run_codesign(arguments.output, arguments.size)
     run_sequential(arguments.size)
     print(f"simultaneous minimum wind: {simultaneous:.3f} m/s")
+    run_sizing_routes(arguments.size)
+    run_pareto(arguments.output, min(arguments.size, 12))
     print(f"figures written to {arguments.output}")
 
 

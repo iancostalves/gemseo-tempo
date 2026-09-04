@@ -21,13 +21,17 @@ plan, which is exactly what a statics chain is for: the design variables go in
 one end, and the coefficients the equations of motion actually use come out
 the other, differentiated along with everything else.
 
-Four models make the chain.
+Five models make the chain.
 
 :class:`AirfoilSection` sets the trade between gliding well and turning hard,
 which is the one that decides what kind of bird this is.
 
 :class:`WingGeometry` turns the plan into an aspect ratio and the induced-drag
 factor ``k`` of the drag polar ``C_D = C_D0 + k C_L^2``.
+
+:class:`FiniteWing` decides how much of the section's properties the wing
+actually keeps, which is where aspect ratio reaches the maximum lift
+coefficient rather than only the drag.
 
 :class:`StructuralMass` charges the bird for the wing it is carrying, which is
 what stops the co-design formulation from answering with an aspect ratio no
@@ -71,6 +75,49 @@ SECTION_DRAG = (0.025, 0.016)
 
 SECTION_LIFT = (1.2, 0.6)
 """The maximum lift coefficient at ``section = 0``, and its rise."""
+
+AIR_VISCOSITY = 1.81e-5
+"""The dynamic viscosity of air, in Pa s."""
+
+REFERENCE_SPEED = 20.0
+"""The airspeed the Reynolds number is quoted at, in m/s."""
+
+LIFT_SLOPE_2D = 2.0 * float(jnp.pi)
+"""The lift-curve slope of the section, per radian."""
+
+REYNOLDS_DRAG_EXPONENT = 0.4
+"""How fast profile drag falls with Reynolds number.
+
+Between the laminar 0.5 and the turbulent 0.2, which is where a wing this
+size actually sits.
+"""
+
+REYNOLDS_HALF = 1.5e5
+"""The Reynolds number at which maximum lift is half of its ceiling."""
+
+REFERENCE_ASPECT_RATIO = (
+    DESIGN_DEFAULTS["wing_span"] ** 2 / DESIGN_DEFAULTS["wing_area"]
+)
+"""The aspect ratio of the nominal bird."""
+
+REFERENCE_LIFT_SLOPE = LIFT_SLOPE_2D / (
+    1.0
+    + LIFT_SLOPE_2D
+    / (float(jnp.pi) * DESIGN_DEFAULTS["oswald"] * REFERENCE_ASPECT_RATIO)
+)
+"""The lift-curve slope of the nominal wing, per radian."""
+
+REFERENCE_REYNOLDS = (
+    AIR_DENSITY
+    * REFERENCE_SPEED
+    * (DESIGN_DEFAULTS["wing_area"] / DESIGN_DEFAULTS["wing_span"])
+    / AIR_VISCOSITY
+)
+"""The chord Reynolds number of the nominal bird.
+
+Both corrections are normalized here, so the nominal wing keeps its section
+properties exactly and every other wing reads as a departure from it.
+"""
 
 WING_MASS_COEFFICIENT = 0.03354
 """The constant of the wing mass law.
@@ -139,6 +186,31 @@ REGISTRY = VariableRegistry(
             tags=frozenset({"design"}),
         ),
         Variable(
+            name="cd0_section",
+            full_name="Section zero-lift drag",
+            description="Two-dimensional profile drag, before the wing gets it.",
+            tags=frozenset({"statics"}),
+        ),
+        Variable(
+            name="cl_max_section",
+            full_name="Section maximum lift",
+            description="Two-dimensional stall lift, before the wing gets it.",
+            tags=frozenset({"statics"}),
+        ),
+        Variable(
+            name="chord",
+            full_name="Mean chord",
+            description="Wing area over span; what the aspect ratio costs.",
+            unit="m",
+            tags=frozenset({"statics"}),
+        ),
+        Variable(
+            name="reynolds",
+            full_name="Reynolds number",
+            description="Chord Reynolds number at the reference airspeed.",
+            tags=frozenset({"statics"}),
+        ),
+        Variable(
             name="cd0",
             full_name="Zero-lift drag coefficient",
             tags=frozenset({"statics"}),
@@ -195,10 +267,14 @@ class AirfoilSection(AutoModel):
     """
 
     def _jax_func(self, section=DESIGN_DEFAULTS["section"]):
-        """Return the profile drag and the maximum lift of the section."""
-        cd0 = SECTION_DRAG[0] + SECTION_DRAG[1] * section
-        cl_max = SECTION_LIFT[0] + SECTION_LIFT[1] * section
-        return cd0, cl_max
+        """Return the profile drag and the maximum lift of the section.
+
+        These are two-dimensional section properties. What the wing gets to
+        keep of them is decided downstream, by :class:`FiniteWing`.
+        """
+        cd0_section = SECTION_DRAG[0] + SECTION_DRAG[1] * section
+        cl_max_section = SECTION_LIFT[0] + SECTION_LIFT[1] * section
+        return cd0_section, cl_max_section
 
 
 class WingGeometry(AutoModel):
@@ -219,6 +295,59 @@ class WingGeometry(AutoModel):
         aspect_ratio = wing_span**2 / wing_area
         induced_factor = 1.0 / (jnp.pi * oswald * aspect_ratio)
         return aspect_ratio, induced_factor
+
+
+class FiniteWing(AutoModel):
+    """What a real wing keeps of its section's properties.
+
+    Aspect ratio does not only set induced drag. It also decides how much of
+    the section's maximum lift the wing actually gets, by two routes that
+    pull opposite ways.
+
+    **The lift-curve slope.** A finite wing flies in its own downwash, so it
+    reaches a given lift coefficient at a larger angle than the section
+    would: ``a = a0 / (1 + a0 / (pi e AR))``. A longer wing suffers less of
+    that, reaches stall at a smaller angle, and holds a little more lift.
+    Across the aspect ratios this problem uses it is worth about 4%, which
+    is real and small.
+
+    **The Reynolds number, which is the one that bites.** The mean chord is
+    ``S / b``, so at a fixed area a longer wing is a narrower one, and a
+    narrower wing flies at a lower Reynolds number. At bird scale that sits
+    between 1.5e5 and 5e5, exactly where a wing starts losing maximum lift
+    and gaining profile drag as the chord shrinks. This is the reason small
+    flyers do not have sailplane aspect ratios, and without it the optimizer
+    will happily ask for one.
+
+    Both factors are one at the nominal wing, so the section values are what
+    the default bird actually flies with and the corrections read as
+    departures from it.
+    """
+
+    def _jax_func(
+        self,
+        wing_area=DESIGN_DEFAULTS["wing_area"],
+        wing_span=DESIGN_DEFAULTS["wing_span"],
+        oswald=DESIGN_DEFAULTS["oswald"],
+        aspect_ratio=REFERENCE_ASPECT_RATIO,
+        cd0_section=0.033,
+        cl_max_section=1.5,
+    ):
+        """Return the chord, the Reynolds number, and the wing's own polar."""
+        chord = wing_area / wing_span
+        reynolds = AIR_DENSITY * REFERENCE_SPEED * chord / AIR_VISCOSITY
+
+        slope = LIFT_SLOPE_2D / (1.0 + LIFT_SLOPE_2D / (jnp.pi * oswald * aspect_ratio))
+        finite_wing = slope / REFERENCE_LIFT_SLOPE
+
+        low_reynolds_drag = (REFERENCE_REYNOLDS / reynolds) ** REYNOLDS_DRAG_EXPONENT
+        low_reynolds_lift = (reynolds / (reynolds + REYNOLDS_HALF)) / (
+            REFERENCE_REYNOLDS / (REFERENCE_REYNOLDS + REYNOLDS_HALF)
+        )
+
+        cd0 = cd0_section * low_reynolds_drag
+        cl_max = cl_max_section * finite_wing * low_reynolds_lift
+        return chord, reynolds, cd0, cl_max
 
 
 class StructuralMass(AutoModel):
@@ -281,7 +410,21 @@ def create_statics() -> StaticsChain:
     """
     # A model's registry may only describe that model's own variables, so
     # each gets the slice of the shared registry it actually uses.
-    section = REGISTRY.subset(["section", "cd0", "cl_max"])
+    section = REGISTRY.subset(["section", "cd0_section", "cl_max_section"])
+    finite = REGISTRY.subset(
+        [
+            "wing_area",
+            "wing_span",
+            "oswald",
+            "aspect_ratio",
+            "cd0_section",
+            "cl_max_section",
+            "chord",
+            "reynolds",
+            "cd0",
+            "cl_max",
+        ]
+    )
     geometry = REGISTRY.subset(
         ["wing_area", "wing_span", "oswald", "aspect_ratio", "induced_factor"]
     )
@@ -295,6 +438,7 @@ def create_statics() -> StaticsChain:
         [
             AirfoilSection("section", section),
             WingGeometry("geometry", geometry),
+            FiniteWing("finite", finite),
             StructuralMass("structure", structure),
             FlightEnvelope("envelope", envelope),
         ],

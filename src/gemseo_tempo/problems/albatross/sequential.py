@@ -60,7 +60,10 @@ from gemseo_tempo.problems.albatross.problem import _controls
 from gemseo_tempo.problems.albatross.problem import _design_values
 from gemseo_tempo.problems.albatross.problem import create_codesign_optimization
 from gemseo_tempo.problems.albatross.problem import soaring_cycle
+from gemseo_tempo.problems.albatross.statics import AIR_DENSITY
 from gemseo_tempo.problems.albatross.statics import DESIGN_DEFAULTS
+from gemseo_tempo.problems.albatross.statics import GRAVITY
+from gemseo_tempo.problems.albatross.statics import REFERENCE_SPEED
 from gemseo_tempo.problems.albatross.statics import create_statics
 from gemseo_tempo.scenario.dynamic_scenario import DynamicScenario
 from gemseo_tempo.scenario.formulations import SystemDesign
@@ -119,6 +122,54 @@ def total_mass(design: dict[str, float] | None = None) -> float:
     return float(create_statics()(_design_values(design))["mass"])
 
 
+def turn_capability(design: dict[str, float] | None = None) -> float:
+    """Return the load factor the wing can pull at the reference speed.
+
+    This is the dynamics proxy, and it is deliberately computable from the
+    wing alone: ``n = 0.5 rho V^2 S C_L,max / (m g)``. A wing that can pull
+    more turns in a smaller radius, and turning is what a soaring cycle
+    spends its time doing. No trajectory is flown to get it, which is the
+    whole point of a proxy.
+
+    Parameters
+    ----------
+    design
+        Overrides of :data:`.DESIGN_DEFAULTS`.
+
+    Returns
+    -------
+    float
+        The maximum aerodynamic load factor.
+    """
+    values = _design_values(design)
+    statics = create_statics()(values)
+    lift = (
+        0.5
+        * AIR_DENSITY
+        * REFERENCE_SPEED**2
+        * values["wing_area"]
+        * float(statics["cl_max"])
+    )
+    return lift / (float(statics["mass"]) * GRAVITY)
+
+
+CRUISE_WEIGHTS = {"glide_ratio": 1.0, "mass": 0.0, "turn": 0.0}
+"""Size for gliding alone.
+
+This is what conventional design does when the assumption is never written
+down: the best-gliding wing is taken to be the best wing, because cruise is
+tacitly the mission.
+"""
+
+DYNAMICS_WEIGHTS = {"glide_ratio": 1.0, "mass": 0.0, "turn": 1.0}
+"""Size for gliding and turning together.
+
+The equal weighting is a modelling choice rather than a measurement, and it
+is stated here so a reader can see what the wing was asked for. What matters
+is that turning appears at all, which under cruise sizing it does not.
+"""
+
+
 def minimum_wind(
     design: dict[str, float] | None = None,
     size: int = 20,
@@ -145,6 +196,108 @@ def minimum_wind(
     )
     gemseo_scenario.execute(algo_name="SLSQP", max_iter=max_iter)
     return float(gemseo_scenario.optimization_result.f_opt)
+
+
+CROSS_COUNTRY_WIND = 22.0
+"""The wind the cross-country mission is flown in, in m/s."""
+
+CROSS_COUNTRY_DISTANCE = 300.0
+"""The ground distance the cross-country mission must cover, in m."""
+
+
+def cross_country_time(
+    design: dict[str, float] | None = None,
+    size: int = 20,
+    max_iter: int = 400,
+) -> float:
+    """Return how fast a fixed wing covers the cross-country leg.
+
+    The other half of the comparison. Minimum wind asks how little wind the
+    bird can survive on; this asks how quickly it gets somewhere in wind it
+    already has. The cycle must close completely, so the crossing is paid
+    for out of the gradient rather than out of stored energy.
+
+    Parameters
+    ----------
+    design
+        Overrides of :data:`.DESIGN_DEFAULTS`.
+    size
+        The discretization.
+    max_iter
+        The optimizer iteration budget.
+
+    Returns
+    -------
+    float
+        The time to cover :data:`CROSS_COUNTRY_DISTANCE`, in s.
+    """
+    from gemseo_tempo.problems.albatross.problem import create_energy_optimization
+
+    _, gemseo_scenario = create_energy_optimization(
+        size=size,
+        w_ref=CROSS_COUNTRY_WIND,
+        design=design,
+        mission="time",
+        target_distance=CROSS_COUNTRY_DISTANCE,
+    )
+    gemseo_scenario.execute(algo_name="SLSQP", max_iter=max_iter)
+    return float(gemseo_scenario.optimization_result.f_opt)
+
+
+@dataclass
+class SizingRoute:
+    """One way of choosing a wing, and how it then flies."""
+
+    name: str
+    """What the wing was sized for."""
+
+    wing: dict[str, float]
+    """The wing that sizing chose."""
+
+    minimum_wind: float
+    """The weakest wind it closes a cycle in, in m/s."""
+
+    cross_country_time: float
+    """How long it takes to cover the cross-country leg, in s."""
+
+
+def compare_sizing_routes(
+    size: int = 16,
+    max_iter: int = 500,
+) -> list[SizingRoute]:
+    """Size a wing for cruise and for dynamics, then fly both on both missions.
+
+    This is the argument for co-design, made without appealing to it. A wing
+    sized for gliding and a wing sized for gliding-and-turning are different
+    wings, and each is better at what it was sized for. Since a designer
+    picks the merit before knowing the mission, and conventional practice
+    picks cruise by default, the cost of that default is what the table
+    measures.
+
+    Parameters
+    ----------
+    size
+        The discretization of the trajectory runs.
+    max_iter
+        The optimizer iteration budget.
+
+    Returns
+    -------
+    list
+        One :class:`SizingRoute` per weighting, cruise first.
+    """
+    routes = []
+    for name, weights in (("cruise", CRUISE_WEIGHTS), ("dynamics", DYNAMICS_WEIGHTS)):
+        wing = size_the_wing(weights)
+        routes.append(
+            SizingRoute(
+                name=name,
+                wing=wing,
+                minimum_wind=minimum_wind(wing, size, max_iter),
+                cross_country_time=cross_country_time(wing, size, max_iter),
+            )
+        )
+    return routes
 
 
 @dataclass
@@ -262,6 +415,7 @@ def _vehicle_scenario(weights: dict[str, float], size: int = 6) -> DynamicScenar
     nominal_ratio = glide_ratio(None)
     nominal_mass = total_mass(None)
     nominal_lift = float(create_statics()(_design_values(None))["cl_max"])
+    nominal_turn = turn_capability(None)
 
     def merit(t_final, final_states, theta):
         """Return the weighted vehicle merit, in normalized units."""
@@ -270,10 +424,13 @@ def _vehicle_scenario(weights: dict[str, float], size: int = 6) -> DynamicScenar
         ratio = 1.0 / (2.0 * jnp.sqrt(profile * induced))
         mass = jnp.reshape(theta["mass"], ())
         lift = jnp.reshape(theta["cl_max"], ())
+        area = jnp.reshape(theta["wing_area"], ())
+        load = 0.5 * AIR_DENSITY * REFERENCE_SPEED**2 * area * lift / (mass * GRAVITY)
         return (
-            weights["glide_ratio"] * ratio / nominal_ratio
-            - weights["mass"] * mass / nominal_mass
+            weights.get("glide_ratio", 0.0) * ratio / nominal_ratio
+            - weights.get("mass", 0.0) * mass / nominal_mass
             + weights.get("cl_max", 0.0) * lift / nominal_lift
+            + weights.get("turn", 0.0) * load / nominal_turn
         )
 
     return DynamicScenario(
@@ -462,15 +619,23 @@ def misalignment_study(
 
 __all__ = [
     "VEHICLE_PARAMETERS",
+    "CROSS_COUNTRY_DISTANCE",
+    "CROSS_COUNTRY_WIND",
     "SequentialResult",
+    "SizingRoute",
     "Misalignment",
+    "CRUISE_WEIGHTS",
+    "DYNAMICS_WEIGHTS",
     "Sensitivity",
     "glide_ratio",
     "minimum_wind",
     "misalignment_study",
     "sensitivity_study",
+    "compare_sizing_routes",
+    "cross_country_time",
     "sequential_codesign",
     "size_the_wing",
     "weights_from",
     "total_mass",
+    "turn_capability",
 ]

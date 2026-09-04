@@ -26,6 +26,7 @@ from gemseo_tempo.problems.albatross.plots import energy_budget
 from gemseo_tempo.problems.albatross.plots import plot_controls
 from gemseo_tempo.problems.albatross.plots import plot_energy
 from gemseo_tempo.problems.albatross.plots import plot_energy_analysis
+from gemseo_tempo.problems.albatross.plots import plot_pareto
 from gemseo_tempo.problems.albatross.plots import plot_polar
 from gemseo_tempo.problems.albatross.plots import plot_section_trade
 from gemseo_tempo.problems.albatross.plots import plot_trajectory
@@ -41,6 +42,7 @@ from gemseo_tempo.problems.albatross.problem import create_energy_scenario
 from gemseo_tempo.problems.albatross.problem import gliding_baseline
 from gemseo_tempo.problems.albatross.problem import optimal_trajectory
 from gemseo_tempo.problems.albatross.problem import soaring_cycle
+from gemseo_tempo.problems.albatross.problem import solve_pareto_front
 from gemseo_tempo.problems.albatross.statics import DESIGN_DEFAULTS
 from gemseo_tempo.problems.albatross.statics import AirfoilSection
 from gemseo_tempo.problems.albatross.statics import FlightEnvelope
@@ -73,11 +75,13 @@ __all__ = [
     "plot_controls",
     "plot_energy",
     "plot_energy_analysis",
+    "plot_pareto",
     "plot_polar",
     "plot_section_trade",
     "plot_wind_profile",
     "plot_trajectory",
     "soaring_cycle",
+    "solve_pareto_front",
     "wind_gradient",
     "wind_speed",
 ]
