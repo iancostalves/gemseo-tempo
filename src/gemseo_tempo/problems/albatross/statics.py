@@ -21,7 +21,10 @@ plan, which is exactly what a statics chain is for: the design variables go in
 one end, and the coefficients the equations of motion actually use come out
 the other, differentiated along with everything else.
 
-Three models make the chain.
+Four models make the chain.
+
+:class:`AirfoilSection` sets the trade between gliding well and turning hard,
+which is the one that decides what kind of bird this is.
 
 :class:`WingGeometry` turns the plan into an aspect ratio and the induced-drag
 factor ``k`` of the drag polar ``C_D = C_D0 + k C_L^2``.
@@ -54,14 +57,20 @@ DESIGN_DEFAULTS = {
     "wing_area": 0.65,
     "wing_span": 3.44,
     "oswald": 0.9,
-    "cl_max": 1.5,
+    "section": 0.5,
 }
 """The default wandering albatross, roughly to scale.
 
 A bird of about 8.5 kg all told, 6.4 kg of it body, on 0.65 m^2 of wing
 spanning 3.44 m, which is an aspect ratio near 18 and a best glide ratio
-near 20.
+near 20. The wing section sits midway along its trade.
 """
+
+SECTION_DRAG = (0.025, 0.016)
+"""The zero-lift drag at ``section = 0``, and its rise across the range."""
+
+SECTION_LIFT = (1.2, 0.6)
+"""The maximum lift coefficient at ``section = 0``, and its rise."""
 
 WING_MASS_COEFFICIENT = 0.03354
 """The constant of the wing mass law.
@@ -119,11 +128,25 @@ REGISTRY = VariableRegistry(
             tags=frozenset({"design"}),
         ),
         Variable(
+            name="section",
+            full_name="Wing section",
+            description=(
+                "Where the aerofoil sits between fast and high-lift: 0 is"
+                " thin and clean, 1 is thick and cambered."
+            ),
+            lower_bound=0.0,
+            upper_bound=1.0,
+            tags=frozenset({"design"}),
+        ),
+        Variable(
+            name="cd0",
+            full_name="Zero-lift drag coefficient",
+            tags=frozenset({"statics"}),
+        ),
+        Variable(
             name="cl_max",
             full_name="Maximum lift coefficient",
-            lower_bound=0.5,
-            upper_bound=2.5,
-            tags=frozenset({"design"}),
+            tags=frozenset({"statics"}),
         ),
         Variable(
             name="aspect_ratio",
@@ -153,6 +176,29 @@ REGISTRY = VariableRegistry(
     ]
 )
 """The metadata of the design and statics variables."""
+
+
+class AirfoilSection(AutoModel):
+    """The trade a wing section makes between cruising and turning.
+
+    This is the trade that actually shapes a soaring bird, and leaving it
+    out makes the problem answer the wrong question. A thin, clean section
+    has little profile drag and glides beautifully, but stalls early. A
+    thick, cambered one holds far more lift, which is what a hard turn
+    needs, and pays for it in drag every second of the flight.
+
+    Without the coupling the optimizer sees only the glide ratio, since
+    nothing charges it for the lift it uses; the maximum lift coefficient
+    then has no way to influence the design at all. With it, cruising and
+    manoeuvring pull in opposite directions, which is the whole difficulty
+    of designing for dynamic soaring.
+    """
+
+    def _jax_func(self, section=DESIGN_DEFAULTS["section"]):
+        """Return the profile drag and the maximum lift of the section."""
+        cd0 = SECTION_DRAG[0] + SECTION_DRAG[1] * section
+        cl_max = SECTION_LIFT[0] + SECTION_LIFT[1] * section
+        return cd0, cl_max
 
 
 class WingGeometry(AutoModel):
@@ -211,7 +257,7 @@ class FlightEnvelope(AutoModel):
         self,
         mass=8.5,
         wing_area=DESIGN_DEFAULTS["wing_area"],
-        cl_max=DESIGN_DEFAULTS["cl_max"],
+        cl_max=1.5,
     ):
         """Return the wing loading and the stall speed.
 
@@ -235,6 +281,7 @@ def create_statics() -> StaticsChain:
     """
     # A model's registry may only describe that model's own variables, so
     # each gets the slice of the shared registry it actually uses.
+    section = REGISTRY.subset(["section", "cd0", "cl_max"])
     geometry = REGISTRY.subset(
         ["wing_area", "wing_span", "oswald", "aspect_ratio", "induced_factor"]
     )
@@ -246,6 +293,7 @@ def create_statics() -> StaticsChain:
     )
     return StaticsChain(
         [
+            AirfoilSection("section", section),
             WingGeometry("geometry", geometry),
             StructuralMass("structure", structure),
             FlightEnvelope("envelope", envelope),

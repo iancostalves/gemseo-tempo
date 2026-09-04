@@ -72,6 +72,7 @@ object is documented once, under the module that defines it.
 .. autosummary::
    :toctree: generated
 
+   gemseo_tempo.scenario.description
    gemseo_tempo.scenario.dynamic_scenario
    gemseo_tempo.scenario.formulations
    gemseo_tempo.scenario.structured_discipline
@@ -86,6 +87,7 @@ object is documented once, under the module that defines it.
    gemseo_tempo.problems.albatross.model
    gemseo_tempo.problems.albatross.plots
    gemseo_tempo.problems.albatross.problem
+   gemseo_tempo.problems.albatross.sequential
    gemseo_tempo.problems.albatross.statics
    gemseo_tempo.problems.brachistochrone.model
    gemseo_tempo.problems.brachistochrone.problem

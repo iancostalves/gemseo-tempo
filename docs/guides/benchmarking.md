@@ -94,3 +94,45 @@ terminal equalities, and with collocation also defect equalities; L-BFGS-B,
 TNC and Nelder-Mead reject it outright rather than solve it badly, so
 including them would compare failures rather than methods.
 :::
+
+## Recorded for later
+
+Three things the albatross sprint turned up that belong in a study rather than
+in a problem, written down here so they are not rediscovered.
+
+### Separate compilation from execution
+
+Sprint 9 found that `JAXDiscipline` was never compiled, and reported the fix as
+a single speedup number. That conflates two different costs, and the ratio
+between them decides whether compiling is worth doing at all.
+
+A study should report three times per cell rather than one: **compilation**,
+**execution once compiled**, and **eager execution**. A problem that converges
+in a handful of iterations may never repay its compilation, and a
+discretization sweep is exactly where that crossover becomes visible, since
+compilation grows with problem size while the per-call saving is what pays it
+back. The single number currently quoted hides which side of the crossover any
+given cell is on.
+
+### An MDA on the initial speed
+
+The albatross guess is built by inverse dynamics, and it satisfies every
+equation of motion except the one for speed. Speed is also the state whose
+periodicity is hardest to close: it is the one the energy-banking mission
+deliberately leaves open, and the one that separates a cycle that sustains
+itself from one that does not.
+
+Rather than leaving both to the optimizer, the initial speed could be solved by
+an inner MDA driving `V(t_f) - V(t_0)` to zero, handing the outer optimizer a
+smaller and better conditioned problem. Whether that is faster overall is not
+obvious: the inner solve costs something every outer iteration, and the outer
+problem is already well seeded. It is a clean two-cell comparison, all-at-once
+against the nested formulation, on a problem where the coupling is real.
+
+### The mission family is a benchmark axis
+
+Formulation A takes a `mission` (`energy`, `distance`, `time`) and a `topology`
+(`loop`, `weave`). Those are the natural cells of a study: the same bird in the
+same wind, asked for different things. They already show that the answer to
+"what is the best wing" depends on which one is asked, so a benchmark that
+sweeps them measures something a single-objective sweep cannot.

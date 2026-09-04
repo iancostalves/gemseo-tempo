@@ -39,7 +39,12 @@ from gemseo_tempo.problems.albatross import optimal_trajectory
 from gemseo_tempo.problems.albatross import plot_controls
 from gemseo_tempo.problems.albatross import plot_energy
 from gemseo_tempo.problems.albatross import plot_energy_analysis
+from gemseo_tempo.problems.albatross import plot_polar
+from gemseo_tempo.problems.albatross import plot_section_trade
 from gemseo_tempo.problems.albatross import plot_trajectory
+from gemseo_tempo.problems.albatross import plot_wind_profile
+from gemseo_tempo.problems.albatross.sequential import sequential_codesign
+from gemseo_tempo.scenario.description import describe_problem
 
 WIND_SWEEP = (0.0, 8.0, 12.0, 16.0, 18.0, 22.0, 26.0)
 """The reference wind speeds the energy formulation is swept over, in m/s."""
@@ -147,16 +152,91 @@ def run_codesign(output: Path, size: int = 20) -> float:
     return float(result.f_opt)
 
 
+def draw_the_model(output: Path) -> None:
+    """Write the figures of the bird and the wind it flies in.
+
+    Parameters
+    ----------
+    output
+        The directory to write into.
+    """
+    _save(plot_wind_profile()[0].figure, output / "wind_profile.png")
+    _save(plot_polar()[0].figure, output / "polar.png")
+    _save(plot_section_trade().figure, output / "section_trade.png")
+
+
+def report_the_problems(size: int = 20) -> None:
+    """Print the problem statement of each formulation.
+
+    Parameters
+    ----------
+    size
+        The discretization.
+    """
+    from gemseo_tempo.problems.albatross.problem import _bounds
+    from gemseo_tempo.problems.albatross.problem import create_codesign_scenario
+    from gemseo_tempo.problems.albatross.problem import create_energy_scenario
+    from gemseo_tempo.scenario import ControlAndDesign
+    from gemseo_tempo.scenario import OptimalControl
+
+    energy = create_energy_scenario(size=size, w_ref=22.0)
+    print("")
+    print("=== A: maximum energy in a fixed wind ===")
+    print(
+        describe_problem(
+            energy, OptimalControl(energy, maximize=True, bounds=_bounds(energy))
+        )
+    )
+    codesign = create_codesign_scenario(size=size)
+    print("")
+    print("=== C: minimum wind, everything free ===")
+    print(
+        describe_problem(
+            codesign,
+            ControlAndDesign(
+                codesign,
+                ["w_ref", "wing_area", "wing_span", "section"],
+                bounds=_bounds(codesign),
+            ),
+        )
+    )
+
+
+def run_sequential(size: int = 20) -> None:
+    """Size the bird first, then fly it, and report both.
+
+    Parameters
+    ----------
+    size
+        The discretization.
+    """
+    result = sequential_codesign(size=size)
+    print("")
+    print("=== B: size the bird, then fly it ===")
+    print(f"{'figure of merit':>16} {'baseline':>10} {'elasticity':>12}")
+    for name, sensitivity in result.sensitivities.items():
+        print(
+            f"{name:>16} {sensitivity.baseline:10.3f} {sensitivity.elasticity:+12.4f}"
+        )
+    wing = ", ".join(f"{k}={v:.3f}" for k, v in result.wing.items())
+    print(f"sized wing: {wing}")
+    print(f"sequential minimum wind: {result.minimum_wind:.3f} m/s")
+
+
 def main() -> None:
-    """Run both formulations and write the figures."""
+    """Run every formulation and write the figures."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path("figures/albatross"))
     parser.add_argument("--size", type=int, default=20)
     arguments = parser.parse_args()
     logging.disable(logging.CRITICAL)
 
+    draw_the_model(arguments.output)
+    report_the_problems(arguments.size)
     run_energy_sweep(arguments.output, arguments.size)
-    run_codesign(arguments.output, arguments.size)
+    simultaneous = run_codesign(arguments.output, arguments.size)
+    run_sequential(arguments.size)
+    print(f"simultaneous minimum wind: {simultaneous:.3f} m/s")
     print(f"figures written to {arguments.output}")
 
 

@@ -44,11 +44,15 @@ from gemseo_tempo.problems.albatross import optimal_trajectory
 from gemseo_tempo.problems.albatross import plot_controls
 from gemseo_tempo.problems.albatross import plot_energy
 from gemseo_tempo.problems.albatross import plot_energy_analysis
+from gemseo_tempo.problems.albatross import plot_polar
+from gemseo_tempo.problems.albatross import plot_section_trade
 from gemseo_tempo.problems.albatross import plot_trajectory
+from gemseo_tempo.problems.albatross import plot_wind_profile
 from gemseo_tempo.problems.albatross import soaring_cycle
 from gemseo_tempo.problems.albatross import wind_gradient
 from gemseo_tempo.problems.albatross import wind_speed
 from gemseo_tempo.problems.albatross.plots import _series
+from gemseo_tempo.problems.albatross.sequential import glide_ratio
 from gemseo_tempo.transcriptions import SingleShooting
 
 logging.disable(logging.CRITICAL)
@@ -208,6 +212,8 @@ def test_the_energy_budget_closes(w_ref):
         "mass": float(statics["mass"]),
         "wing_area": DESIGN_DEFAULTS["wing_area"],
         "induced_factor": float(statics["induced_factor"]),
+        "cd0": float(statics["cd0"]),
+        "cl_max": float(statics["cl_max"]),
     }
     knots = jnp.linspace(0.0, 12.0, 9)
     controls = (
@@ -361,7 +367,7 @@ def test_the_split_assembly_jacobians_are_right():
         transcription=SingleShooting(),
         size=6,
         assembly="split",
-        integrator=DiffraxIntegrator(dt0=0.02, n_save=7),
+        integrator=DiffraxIntegrator(dt0=0.01, n_save=7),
     )
     for discipline in scenario.disciplines:
         assert discipline.check_jacobian(threshold=1e-3, step=1e-7), discipline.name
@@ -440,3 +446,143 @@ def test_every_figure_accepts_an_existing_axis(soaring):
     assert plot_energy(trajectory, another) is another
     _, three = pyplot.subplots(3, 1)
     assert plot_energy_analysis(trajectory, three) is three
+
+
+# ------------------------------------------------------ the section trade
+
+
+def test_the_section_trades_cruise_against_lift():
+    """A cleaner section glides further and stalls earlier, and vice versa."""
+    chain = create_statics()
+    sections = [0.0, 0.5, 1.0]
+    ratios, lifts = [], []
+    for section in sections:
+        outputs = chain(dict(DESIGN_DEFAULTS, section=section))
+        ratios.append(glide_ratio({"section": section}))
+        lifts.append(float(outputs["cl_max"]))
+    # Glide ratio falls as the section gets thicker; maximum lift rises.
+    assert ratios[0] > ratios[1] > ratios[2]
+    assert lifts[0] < lifts[1] < lifts[2]
+
+
+def test_the_lift_limit_is_an_active_constraint(codesign):
+    """The cycle spends most of its length on the maximum lift coefficient.
+
+    This is worth asserting rather than assuming. The lift limit was once
+    a hard-coded bound disconnected from ``cl_max``, and because it never
+    reached the design constant the sensitivity of the mission to maximum
+    lift measured as exactly zero, which read like physics and was an
+    artefact.
+    """
+    scenario, gemseo_scenario = codesign
+    trajectory = optimal_trajectory(scenario, gemseo_scenario)
+    lift = _series(trajectory, "cl")
+    optimum = gemseo_scenario.optimization_result.x_opt_as_dict
+    design = {
+        name.removeprefix("constant."): float(value[0])
+        for name, value in optimum.items()
+        if name.startswith("constant.") and name != "constant.w_ref"
+    }
+    limit = float(create_statics()(dict(DESIGN_DEFAULTS, **design))["cl_max"])
+    assert lift.max() == pytest.approx(limit, abs=1e-3)
+    assert (lift > limit - 0.01).sum() > lift.size // 2
+
+
+# ---------------------------------------------------------- the missions
+
+
+@pytest.mark.parametrize("mission", ["energy", "distance", "time"])
+def test_each_mission_converges_and_closes_what_it_should(mission):
+    """Every mission builds, converges, and closes its own periodicity."""
+    extra = {"target_distance": 250.0} if mission == "time" else {}
+    scenario, gemseo_scenario = create_energy_optimization(
+        size=SIZE, w_ref=STRONG_WIND, mission=mission, **extra
+    )
+    gemseo_scenario.execute(algo_name="SLSQP", max_iter=300)
+    trajectory = optimal_trajectory(scenario, gemseo_scenario)
+    energy = _series(trajectory, "specific_energy")
+
+    height = _series(trajectory, "h")
+    assert height[-1] == pytest.approx(height[0], abs=1e-4)
+    if mission == "energy":
+        # Speed is deliberately left open, which is where the gain shows up.
+        assert energy[-1] > energy[0]
+    else:
+        # Closing in speed too makes the cycle exactly energy-neutral.
+        assert energy[-1] == pytest.approx(energy[0], abs=1e-3)
+    if mission == "time":
+        assert _series(trajectory, "x")[-1] == pytest.approx(250.0, abs=1e-2)
+
+
+def test_a_neutral_cycle_covers_more_ground_than_an_energy_hungry_one():
+    """Spending the surplus on progress buys progress."""
+    banked = create_energy_optimization(size=SIZE, w_ref=STRONG_WIND, mission="energy")
+    spent = create_energy_optimization(size=SIZE, w_ref=STRONG_WIND, mission="distance")
+    for _, gemseo_scenario in (banked, spent):
+        gemseo_scenario.execute(algo_name="SLSQP", max_iter=300)
+    covered = _series(optimal_trajectory(*banked), "x")[-1]
+    further = -float(spent[1].optimization_result.f_opt)
+    assert further > covered
+
+
+def test_unknown_missions_and_topologies_are_rejected():
+    with pytest.raises(ValueError, match="Unknown mission"):
+        create_energy_scenario(size=6, mission="glory")
+    with pytest.raises(ValueError, match="Unknown topology"):
+        soaring_cycle(topology="spiral")
+    with pytest.raises(ValueError, match="needs a target_distance"):
+        create_energy_scenario(size=6, mission="time")
+
+
+# -------------------------------------------------------- the topologies
+
+
+@pytest.mark.parametrize(
+    ("topology", "gained"), [("loop", 2.0 * numpy.pi), ("weave", 0.0)]
+)
+def test_the_topology_decides_what_the_heading_does(topology, gained):
+    """A loop turns all the way round; a weave turns one way and back."""
+    _, states, _ = soaring_cycle(topology=topology, count=41)
+    heading = numpy.asarray(states["psi"])
+    assert heading[-1] - heading[0] == pytest.approx(gained, abs=1e-6)
+    if topology == "weave":
+        # It still has to swing, or there is no manoeuvre at all.
+        assert numpy.ptp(heading) > 1.0
+
+
+def test_a_weave_can_sustain_itself_even_though_it_cannot_bank_energy():
+    """The weave closes an energy-neutral cycle and makes real progress.
+
+    It has no heading reversal to exploit, so it cannot pay for itself the
+    way a loop does, and asked to maximize energy it converges to a cycle
+    that loses. Forced to close in speed as well it does find a neutral
+    cycle, so what fails above is the search rather than the topology.
+    """
+    scenario, gemseo_scenario = create_energy_optimization(
+        size=SIZE, w_ref=STRONG_WIND, topology="weave", mission="distance"
+    )
+    gemseo_scenario.execute(algo_name="SLSQP", max_iter=300)
+    trajectory = optimal_trajectory(scenario, gemseo_scenario)
+    energy = _series(trajectory, "specific_energy")
+    heading = _series(trajectory, "psi")
+    assert energy[-1] == pytest.approx(energy[0], abs=1e-3)
+    assert heading[-1] - heading[0] == pytest.approx(0.0, abs=1e-4)
+    assert -float(gemseo_scenario.optimization_result.f_opt) > 100.0
+
+
+# ------------------------------------------------------- the model figures
+
+
+def test_the_model_figures_draw():
+    assert len(plot_wind_profile()) == 2
+    assert len(plot_polar()) == 2
+    assert plot_section_trade() is not None
+
+
+def test_the_model_figures_accept_existing_axes():
+    _, pair = pyplot.subplots(1, 2)
+    assert plot_wind_profile(axes=pair) is pair
+    _, another = pyplot.subplots(1, 2)
+    assert plot_polar(axes=another) is another
+    _, single = pyplot.subplots()
+    assert plot_section_trade(single) is single

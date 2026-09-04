@@ -110,9 +110,6 @@ before the logarithm is taken.
 LOG_RATIO = float(jnp.log(REFERENCE_HEIGHT / ROUGHNESS))
 """The logarithm that normalizes the profile to the reference height."""
 
-DRAG_COEFFICIENT = 0.033
-"""The zero-lift drag coefficient of the drag polar."""
-
 REGISTRY = VariableRegistry(
     [
         Variable(
@@ -311,7 +308,7 @@ def _forces(state, control, theta):
     dynamic_pressure = 0.5 * AIR_DENSITY * state["V"] ** 2 * theta["wing_area"]
     lift = dynamic_pressure * control["cl"]
     drag = dynamic_pressure * (
-        DRAG_COEFFICIENT + theta["induced_factor"] * control["cl"] ** 2
+        theta["cd0"] + theta["induced_factor"] * control["cl"] ** 2
     )
     return lift, drag
 
@@ -386,7 +383,14 @@ def create_state_space() -> StateSpace:
     return StateSpace(
         states=["x", "y", "h", "V", "gamma", "psi"],
         controls=["cl", "mu"],
-        parameters=["w_ref", "mass", "wing_area", "induced_factor"],
+        parameters=[
+            "w_ref",
+            "mass",
+            "wing_area",
+            "induced_factor",
+            "cd0",
+            "cl_max",
+        ],
         outputs=[
             "specific_energy",
             "ground_energy",

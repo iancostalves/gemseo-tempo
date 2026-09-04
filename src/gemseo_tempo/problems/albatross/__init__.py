@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-from gemseo_tempo.problems.albatross.model import DRAG_COEFFICIENT
 from gemseo_tempo.problems.albatross.model import MIN_HEIGHT
 from gemseo_tempo.problems.albatross.model import REFERENCE_HEIGHT
 from gemseo_tempo.problems.albatross.model import ROUGHNESS
@@ -27,7 +26,10 @@ from gemseo_tempo.problems.albatross.plots import energy_budget
 from gemseo_tempo.problems.albatross.plots import plot_controls
 from gemseo_tempo.problems.albatross.plots import plot_energy
 from gemseo_tempo.problems.albatross.plots import plot_energy_analysis
+from gemseo_tempo.problems.albatross.plots import plot_polar
+from gemseo_tempo.problems.albatross.plots import plot_section_trade
 from gemseo_tempo.problems.albatross.plots import plot_trajectory
+from gemseo_tempo.problems.albatross.plots import plot_wind_profile
 from gemseo_tempo.problems.albatross.problem import NOMINAL_WIND
 from gemseo_tempo.problems.albatross.problem import REGISTRY
 from gemseo_tempo.problems.albatross.problem import TURN
@@ -40,6 +42,7 @@ from gemseo_tempo.problems.albatross.problem import gliding_baseline
 from gemseo_tempo.problems.albatross.problem import optimal_trajectory
 from gemseo_tempo.problems.albatross.problem import soaring_cycle
 from gemseo_tempo.problems.albatross.statics import DESIGN_DEFAULTS
+from gemseo_tempo.problems.albatross.statics import AirfoilSection
 from gemseo_tempo.problems.albatross.statics import FlightEnvelope
 from gemseo_tempo.problems.albatross.statics import StructuralMass
 from gemseo_tempo.problems.albatross.statics import WingGeometry
@@ -47,13 +50,13 @@ from gemseo_tempo.problems.albatross.statics import create_statics
 
 __all__ = [
     "DESIGN_DEFAULTS",
-    "DRAG_COEFFICIENT",
     "MIN_HEIGHT",
     "NOMINAL_WIND",
     "REFERENCE_HEIGHT",
     "REGISTRY",
     "ROUGHNESS",
     "TURN",
+    "AirfoilSection",
     "FlightEnvelope",
     "Guess",
     "StructuralMass",
@@ -70,6 +73,9 @@ __all__ = [
     "plot_controls",
     "plot_energy",
     "plot_energy_analysis",
+    "plot_polar",
+    "plot_section_trade",
+    "plot_wind_profile",
     "plot_trajectory",
     "soaring_cycle",
     "wind_gradient",

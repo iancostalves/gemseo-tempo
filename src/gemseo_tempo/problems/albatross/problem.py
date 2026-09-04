@@ -56,6 +56,7 @@ start non-zero, which is the optimizer's job to fix.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import jax.numpy as jnp
 
@@ -64,8 +65,8 @@ from gemseo_tempo.dynamics.integrators import DiffraxIntegrator
 from gemseo_tempo.dynamics.integrators import Trajectory
 from gemseo_tempo.outputs.constraints import PathConstraint
 from gemseo_tempo.outputs.constraints import PeriodicityConstraint
+from gemseo_tempo.outputs.constraints import TerminalConstraint
 from gemseo_tempo.outputs.functionals import Mayer
-from gemseo_tempo.problems.albatross.model import DRAG_COEFFICIENT
 from gemseo_tempo.problems.albatross.model import MIN_HEIGHT
 from gemseo_tempo.problems.albatross.model import REGISTRY as DYNAMICS_REGISTRY
 from gemseo_tempo.problems.albatross.model import create_state_space
@@ -79,10 +80,14 @@ from gemseo_tempo.problems.albatross.statics import create_statics
 from gemseo_tempo.scenario.dynamic_scenario import DynamicScenario
 from gemseo_tempo.scenario.formulations import ControlAndDesign
 from gemseo_tempo.scenario.formulations import OptimalControl
+from gemseo_tempo.transcriptions.base import CONSTANT_PREFIX
 from gemseo_tempo.transcriptions.base import TIMES
 from gemseo_tempo.transcriptions.base import TRAJECTORY_PREFIX
 from gemseo_tempo.transcriptions.base import BoundarySpec
 from gemseo_tempo.transcriptions.collocation import HermiteSimpson
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 REGISTRY = DYNAMICS_REGISTRY
 for _name in DESIGN_REGISTRY:
@@ -97,6 +102,46 @@ MAX_LOAD_FACTOR = 4.5
 
 CYCLE_HEIGHT_LIMIT = 2.0
 """The lowest the bird may fly, in m."""
+
+WIND_BOUNDS = (1.0, 40.0)
+"""The range the reference wind is searched over, in m/s."""
+
+WING_BOUNDS = {
+    "wing_area": (0.5, 0.9),
+    "wing_span": (2.5, 3.7),
+    "section": (0.0, 1.0),
+}
+"""The wing designs considered, in m^2 and m.
+
+The observed range of a wandering albatross rather than a wide box. Within
+this model the wind a cycle needs falls monotonically with aspect ratio, so
+whatever bound is given will be the answer; making it the real bird's range
+at least makes the answer mean something.
+"""
+
+TOPOLOGIES = ("loop", "weave")
+"""The two cycle shapes.
+
+A **loop** turns all the way round, so the heading gains a full turn and the
+ground track closes as an O. A **weave** turns one way and back, so the
+heading returns to itself and the track is an S. The periodicity offset is
+the only thing that distinguishes them.
+"""
+
+WEAVE_HEADING_SWING = 1.6
+"""The heading amplitude of the guessed weave, in rad."""
+
+MISSIONS = ("energy", "distance", "time")
+"""What the cycle is being flown for.
+
+``energy`` banks whatever it extracts as airspeed and closes only in height
+and attitude. ``distance`` and ``time`` close in speed as well, so the cycle
+is energy-neutral and is spending exactly what it earns; the difference is
+what it buys with it.
+"""
+
+MISSION_MAXIMIZES = {"energy": True, "distance": True, "time": False}
+"""Whether each mission's objective is maximized."""
 
 TURN = 2.0 * float(jnp.pi)
 """The heading gained over one cycle: the bird comes back on the same
@@ -149,6 +194,7 @@ def soaring_cycle(
     w_ref: float = NOMINAL_WIND,
     design: dict[str, float] | None = None,
     count: int = 41,
+    topology: str = "loop",
 ):
     """Build a closed cycle and the controls that would fly it.
 
@@ -162,13 +208,25 @@ def soaring_cycle(
         Overrides of :data:`.DESIGN_DEFAULTS`.
     count
         The number of samples over the cycle.
+    topology
+        ``"loop"`` to turn all the way round, ``"weave"`` to turn one way
+        and back.
 
     Returns
     -------
     tuple
         The sample times, the states keyed by name, and the controls keyed
         by name.
+
+    Raises
+    ------
+    ValueError
+        If the topology is unknown.
     """
+    if topology not in TOPOLOGIES:
+        raise ValueError(
+            f"Unknown topology {topology!r}; use one of {list(TOPOLOGIES)}."
+        )
     guess = guess or Guess()
     values = _design_values(design)
     # The mass now comes out of the statics chain, since the wing weighs
@@ -176,10 +234,29 @@ def soaring_cycle(
     mass = float(create_statics()(values)["mass"])
 
     times = jnp.linspace(0.0, guess.period, count)
-    heading = 2.0 * jnp.pi * times / guess.period
-    # A quarter cycle out of phase with the heading: climbing while headed
-    # into the wind, descending while headed with it.
-    climb = -guess.climb_amplitude * jnp.cos(heading)
+    phase = 2.0 * jnp.pi * times / guess.period
+    if topology == "loop":
+        # The heading winds through a full turn, and the climb angle lags it
+        # by a quarter cycle: climbing while headed into the wind, descending
+        # while headed with it.
+        heading = phase
+        climb = -guess.climb_amplitude * jnp.cos(phase)
+        heading_rate = 2.0 * jnp.pi / guess.period * jnp.ones_like(times)
+        climb_accel = (
+            guess.climb_amplitude * jnp.sin(phase) * (2.0 * jnp.pi / guess.period)
+        )
+    else:
+        # The heading swings either side of dead upwind and comes back, so
+        # it gains nothing over the cycle. The climb peaks where the heading
+        # is most nearly upwind, which is where climbing pays best.
+        heading = jnp.pi + WEAVE_HEADING_SWING * jnp.sin(phase)
+        climb = guess.climb_amplitude * jnp.cos(phase)
+        heading_rate = (
+            WEAVE_HEADING_SWING * jnp.cos(phase) * 2.0 * jnp.pi / guess.period
+        )
+        climb_accel = (
+            -guess.climb_amplitude * jnp.sin(phase) * (2.0 * jnp.pi / guess.period)
+        )
     speed = guess.airspeed * jnp.ones_like(times)
 
     # Height follows the climb angle, and closes because it averages to zero.
@@ -193,8 +270,6 @@ def soaring_cycle(
     height = height - jnp.mean(height) + guess.mean_height
 
     # Invert the two rotational equations for the lift and the bank.
-    heading_rate = 2.0 * jnp.pi / guess.period
-    climb_accel = guess.climb_amplitude * jnp.sin(heading) * heading_rate
     wind_rate = wind_gradient(height, w_ref) * climb_rate
     lift_vertical = mass * (
         speed * climb_accel + GRAVITY * jnp.cos(climb)
@@ -273,9 +348,18 @@ def _path_constraints():
     def height(t, s, u, theta):
         return CYCLE_HEIGHT_LIMIT - s["h"]
 
+    def lift_limit(t, s, u, theta):
+        # The wing stalls above its maximum lift coefficient, and this is
+        # the constraint that actually binds: the cycle sits on it for most
+        # of its length, because turning hard is what the manoeuvre needs.
+        # It has to be a path constraint rather than a bound on the knots,
+        # since the control is interpolated and overshoots between them.
+        return u["cl"] - jnp.reshape(theta["cl_max"], ())
+
     return (
         PathConstraint("load_factor_limit", load_factor),
         PathConstraint("height_limit", height),
+        PathConstraint("lift_limit", lift_limit),
     )
 
 
@@ -286,13 +370,20 @@ def create_energy_scenario(
     w_ref: float = NOMINAL_WIND,
     design: dict[str, float] | None = None,
     integrator=None,
+    mission: str = "energy",
+    topology: str = "loop",
+    course: float = 0.0,
+    target_distance: float | None = None,
     **scenario_settings,
 ) -> DynamicScenario:
-    """Build the fixed-wind, maximum-energy cycle.
+    """Build a fixed-wind cycle, for one of three missions.
 
-    The bird starts from a given state and must return to the same height
-    and attitude after one period. Its speed at the end is free, so any
-    energy it extracts from the wind appears there.
+    The ``energy`` mission returns to the same height and attitude after one
+    period with its speed left free, so whatever it extracts from the wind
+    appears there. The other two close in speed as well, making the cycle
+    energy-neutral, and ask what that neutral cycle can be spent on:
+    ``distance`` covers as much ground as it can in a fixed time, and
+    ``time`` covers a fixed distance as fast as it can.
 
     Parameters
     ----------
@@ -312,6 +403,16 @@ def create_energy_scenario(
         which is what finite-difference checks need: adaptive stepping
         changes its step sequence discontinuously as the inputs move, and
         the resulting noise swamps a 1e-7 probe.
+    mission
+        One of :data:`MISSIONS`.
+    topology
+        ``"loop"`` or ``"weave"``; see :data:`TOPOLOGIES`.
+    course
+        The bearing progress is measured along, in rad from the downwind
+        axis. Only the ``distance`` and ``time`` missions use it.
+    target_distance
+        The distance the ``time`` mission must cover, in m. Required by
+        that mission and ignored by the others.
     **scenario_settings
         Extra settings forwarded to :class:`.DynamicScenario`.
 
@@ -319,35 +420,70 @@ def create_energy_scenario(
     -------
     DynamicScenario
         The scenario, seeded with the guessed cycle.
+
+    Raises
+    ------
+    ValueError
+        If the mission is unknown, or ``time`` is asked for without a
+        target distance.
     """
+    if mission not in MISSIONS:
+        raise ValueError(f"Unknown mission {mission!r}; use one of {list(MISSIONS)}.")
+    if mission == "time" and target_distance is None:
+        raise ValueError("The 'time' mission needs a target_distance to cover.")
+
     guess = guess or Guess()
-    times, states, controls = soaring_cycle(guess, w_ref, design, size + 1)
+    times, states, controls = soaring_cycle(guess, w_ref, design, size + 1, topology)
     values = _design_values(design)
     state_space = create_state_space()
     transcription = transcription or HermiteSimpson(num_segments=size)
 
+    def made_good(final_states):
+        """Return the ground distance covered along the course bearing."""
+        return jnp.cos(course) * final_states["x"] + jnp.sin(course) * final_states["y"]
+
+    free_time = mission == "time"
+    # A free duration puts the dynamics on the normalized clock, so the
+    # control knots move with it.
+    knots = jnp.linspace(0.0, 1.0, size + 1) if free_time else times
+    closed = (
+        ["h", "gamma", "psi"] if mission == "energy" else ["h", "V", "gamma", "psi"]
+    )
+    offsets = {"psi": TURN if topology == "loop" else 0.0}
+
+    if mission == "energy":
+        objective = Mayer(
+            "energy",
+            lambda t_final, s1, th: s1["h"] + s1["V"] ** 2 / (2.0 * GRAVITY),
+        )
+        extra = ()
+    elif mission == "distance":
+        objective = Mayer("distance", lambda t_final, s1, th: made_good(s1))
+        extra = ()
+    else:
+        objective = Mayer("duration", lambda t_final, s1, th: t_final)
+        extra = (
+            TerminalConstraint(
+                "distance_target",
+                lambda t_final, s1, th: made_good(s1) - target_distance,
+            ),
+        )
+
     boundary = BoundarySpec(
         s0={name: float(values[0]) for name, values in states.items()},
-        free_final_time=False,
+        free_final_time=free_time,
+        t_f=guess.period if free_time else None,
     )
     scenario = DynamicScenario(
         state_space=state_space,
         integrator=integrator
         or DiffraxIntegrator(rtol=1e-8, atol=1e-8, n_save=size + 1),
-        controls=_controls(times, controls),
-        functionals=(
-            Mayer(
-                "energy",
-                lambda t_final, s1, th: s1["h"] + s1["V"] ** 2 / (2.0 * GRAVITY),
-            ),
-        ),
-        # The cycle closes in height and attitude, but deliberately not in
-        # speed: that is where the extracted energy shows up.
+        controls=_controls(knots, controls),
+        functionals=(objective,),
         constraints=(
-            PeriodicityConstraint(
-                "cycle", ["h", "gamma", "psi"], offsets={"psi": TURN}
-            ),
+            PeriodicityConstraint("cycle", closed, offsets=offsets),
             *_path_constraints(),
+            *extra,
         ),
         boundary=boundary,
         transcription=transcription,
@@ -355,7 +491,7 @@ def create_energy_scenario(
         statics=create_statics(),
         constants={"w_ref": w_ref, **values},
         t0=0.0,
-        t1=guess.period,
+        t1=1.0 if free_time else guess.period,
         **scenario_settings,
     )
     if isinstance(transcription, HermiteSimpson):
@@ -514,6 +650,7 @@ def create_energy_optimization(
     guess: Guess | None = None,
     w_ref: float = NOMINAL_WIND,
     design: dict[str, float] | None = None,
+    **scenario_settings,
 ):
     """Build the GEMSEO scenario of the maximum-energy cycle.
 
@@ -529,14 +666,25 @@ def create_energy_optimization(
         The reference wind speed, in m/s.
     design
         Overrides of :data:`.DESIGN_DEFAULTS`.
+    **scenario_settings
+        Forwarded to :func:`create_energy_scenario`, which is how the
+        mission and the topology are chosen.
 
     Returns
     -------
     tuple
         The :class:`.DynamicScenario` and the GEMSEO scenario on it.
     """
-    scenario = create_energy_scenario(transcription, size, guess, w_ref, design)
-    formulation = OptimalControl(scenario, maximize=True, bounds=_bounds(scenario))
+    scenario = create_energy_scenario(
+        transcription, size, guess, w_ref, design, **scenario_settings
+    )
+    bounds = _bounds(scenario)
+    bounds["t_f"] = (3.0, 30.0)
+    formulation = OptimalControl(
+        scenario,
+        maximize=MISSION_MAXIMIZES[scenario_settings.get("mission", "energy")],
+        bounds=bounds,
+    )
     return scenario, formulation.create_gemseo_scenario()
 
 
@@ -545,6 +693,7 @@ def create_codesign_optimization(
     size: int = 20,
     guess: Guess | None = None,
     design: dict[str, float] | None = None,
+    design_names: Sequence[str] = ("w_ref", "wing_area", "wing_span", "section"),
 ):
     """Build the GEMSEO scenario of the minimum-wind cycle.
 
@@ -558,6 +707,11 @@ def create_codesign_optimization(
         The starting cycle.
     design
         Overrides of :data:`.DESIGN_DEFAULTS`.
+    design_names
+        The constants to optimize. The default frees the wing along with
+        the wind, which is the simultaneous co-design; passing just
+        ``("w_ref",)`` holds the wing and optimizes the trajectory alone,
+        which is what the sequential route does once its wing is chosen.
 
     Returns
     -------
@@ -566,16 +720,10 @@ def create_codesign_optimization(
     """
     scenario = create_codesign_scenario(transcription, size, guess, design)
     bounds = _bounds(scenario)
-    bounds["constant.w_ref"] = (1.0, 40.0)
-    # The observed range of a wandering albatross rather than a wide box.
-    # Within this model the wind a cycle needs falls monotonically with
-    # aspect ratio, so whatever bound is given will be the answer; making
-    # it the real bird's range at least makes the answer mean something.
-    bounds["constant.wing_area"] = (0.5, 0.9)
-    bounds["constant.wing_span"] = (2.5, 3.7)
-    formulation = ControlAndDesign(
-        scenario, ["w_ref", "wing_area", "wing_span"], bounds=bounds
-    )
+    bounds["constant.w_ref"] = WIND_BOUNDS
+    for name, limits in WING_BOUNDS.items():
+        bounds[CONSTANT_PREFIX + name] = limits
+    formulation = ControlAndDesign(scenario, list(design_names), bounds=bounds)
     return scenario, formulation.create_gemseo_scenario()
 
 
@@ -595,7 +743,7 @@ def _bounds(scenario) -> dict[str, tuple[float, float]]:
     bounds: dict[str, tuple[float, float]] = {}
     for name in scenario.problem.design_variables:
         if name.startswith(("control.cl", "state.cl")):
-            bounds[name] = (-0.2, 1.4)
+            bounds[name] = (-0.2, 2.5)
         elif name.startswith(("control.mu", "state.mu")):
             bounds[name] = (-1.5, 1.5)
         elif name.startswith("state.h"):
@@ -634,10 +782,14 @@ def gliding_baseline(size: int = 20, guess: Guess | None = None) -> float:
 
 __all__ = [
     "CYCLE_HEIGHT_LIMIT",
-    "DRAG_COEFFICIENT",
     "MAX_LOAD_FACTOR",
+    "MISSIONS",
+    "MISSION_MAXIMIZES",
+    "TOPOLOGIES",
     "NOMINAL_WIND",
     "TURN",
+    "WIND_BOUNDS",
+    "WING_BOUNDS",
     "Guess",
     "create_codesign_optimization",
     "create_codesign_scenario",

@@ -275,3 +275,156 @@ def energy_budget(trajectory) -> dict[str, float]:
             numpy.trapezoid(_series(trajectory, "gradient_power"), times)
         ),
     }
+
+
+def plot_wind_profile(reference_winds=(6.0, 12.0, 20.0), axes=None):
+    """Draw the wind profile and its gradient against height.
+
+    This is the figure that explains why the bird flies low. The wind is
+    slowed to nothing at the water and recovers over the first few metres,
+    so the gradient it lives off is steepest exactly where flying is most
+    dangerous, and has largely died away by the height a cycle tops out at.
+
+    Parameters
+    ----------
+    reference_winds
+        The wind speeds at the reference height to draw, in m/s.
+    axes
+        Two axes to draw on; a new figure when omitted.
+
+    Returns
+    -------
+    ndarray
+        The two axes drawn on.
+    """
+    from gemseo_tempo.problems.albatross.model import MIN_HEIGHT
+    from gemseo_tempo.problems.albatross.model import REFERENCE_HEIGHT
+    from gemseo_tempo.problems.albatross.model import wind_gradient
+    from gemseo_tempo.problems.albatross.model import wind_speed
+
+    if axes is None:
+        _, axes = pyplot.subplots(1, 2, figsize=(9.0, 4.2), sharey=True)
+    axes = numpy.atleast_1d(axes)
+    heights = numpy.linspace(0.2, 45.0, 400)
+    for wind in reference_winds:
+        label = f"{wind:g} m/s at {REFERENCE_HEIGHT:g} m"
+        axes[0].plot(
+            [float(wind_speed(h, wind)) for h in heights], heights, label=label
+        )
+        axes[1].plot(
+            [float(wind_gradient(h, wind)) for h in heights], heights, label=label
+        )
+    for axis in axes:
+        axis.axhline(MIN_HEIGHT, color="tab:red", linestyle=":", linewidth=1.0)
+        axis.axhline(REFERENCE_HEIGHT, color="0.5", linestyle="--", linewidth=0.8)
+    axes[0].set_xlabel("wind speed (m/s)")
+    axes[0].set_ylabel("height (m)")
+    axes[0].set_title("The profile")
+    axes[0].legend(loc="lower right", fontsize="small")
+    axes[1].set_xlabel("gradient dW/dh (1/s)")
+    axes[1].set_xscale("log")
+    axes[1].set_title("What the bird actually lives off")
+    return axes
+
+
+def plot_polar(design=None, axes=None):
+    """Draw the drag polar and the glide ratio of a wing.
+
+    Parameters
+    ----------
+    design
+        Overrides of the default design.
+    axes
+        Two axes to draw on; a new figure when omitted.
+
+    Returns
+    -------
+    ndarray
+        The two axes drawn on.
+    """
+    from gemseo_tempo.problems.albatross.problem import _design_values
+    from gemseo_tempo.problems.albatross.statics import create_statics
+
+    if axes is None:
+        _, axes = pyplot.subplots(1, 2, figsize=(9.0, 4.0))
+    axes = numpy.atleast_1d(axes)
+    statics = create_statics()(_design_values(design))
+    profile = float(statics["cd0"])
+    induced = float(statics["induced_factor"])
+    lift_limit = float(statics["cl_max"])
+
+    lift = numpy.linspace(0.0, lift_limit, 300)
+    drag = profile + induced * lift**2
+    ratio = numpy.divide(lift, drag, out=numpy.zeros_like(lift), where=drag > 0.0)
+    best = int(numpy.argmax(ratio))
+
+    axes[0].plot(drag, lift, color="tab:blue")
+    axes[0].set_xlabel("drag coefficient")
+    axes[0].set_ylabel("lift coefficient")
+    axes[0].set_title("Drag polar")
+
+    axes[1].plot(lift, ratio, color="tab:blue")
+    axes[1].axvline(
+        lift[best],
+        color="tab:green",
+        linestyle="--",
+        linewidth=1.0,
+        label=f"best glide {ratio[best]:.1f} at CL {lift[best]:.2f}",
+    )
+    axes[1].axvline(
+        lift_limit,
+        color="tab:red",
+        linestyle=":",
+        linewidth=1.4,
+        label=f"stall at CL {lift_limit:.2f}",
+    )
+    axes[1].set_xlabel("lift coefficient")
+    axes[1].set_ylabel("lift over drag")
+    axes[1].set_title("Glide ratio, and where the cycle is forced to sit")
+    axes[1].legend(loc="lower right", fontsize="small")
+    return axes
+
+
+def plot_section_trade(axes=None):
+    """Draw the cruise-against-manoeuvre trade the wing section makes.
+
+    A thin, clean section glides further; a thick, cambered one holds more
+    lift and turns tighter. The two cannot be had at once, and which end of
+    the trade wins turns out to depend entirely on what the bird is being
+    asked to do.
+
+    Parameters
+    ----------
+    axes
+        The axis to draw on; a new one when omitted.
+
+    Returns
+    -------
+    Axes
+        The axis drawn on.
+    """
+    from gemseo_tempo.problems.albatross.statics import DESIGN_DEFAULTS
+    from gemseo_tempo.problems.albatross.statics import create_statics
+
+    if axes is None:
+        _, axes = pyplot.subplots(figsize=(7.0, 4.0))
+    chain = create_statics()
+    sections = numpy.linspace(0.0, 1.0, 41)
+    ratios, lifts = [], []
+    for section in sections:
+        outputs = chain({**DESIGN_DEFAULTS, "section": float(section)})
+        profile = float(outputs["cd0"])
+        induced = float(outputs["induced_factor"])
+        ratios.append(1.0 / (2.0 * numpy.sqrt(profile * induced)))
+        lifts.append(float(outputs["cl_max"]))
+
+    axes.plot(sections, ratios, color="tab:blue")
+    axes.set_xlabel("section: thin and clean (0) to thick and cambered (1)")
+    axes.set_ylabel("best glide ratio", color="tab:blue")
+    axes.tick_params(axis="y", labelcolor="tab:blue")
+    lift_axis = axes.twinx()
+    lift_axis.plot(sections, lifts, color="tab:red")
+    lift_axis.set_ylabel("maximum lift coefficient", color="tab:red")
+    lift_axis.tick_params(axis="y", labelcolor="tab:red")
+    axes.set_title("Cruise against manoeuvre: the two cannot be had at once")
+    return axes
