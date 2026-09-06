@@ -57,6 +57,7 @@ first principles instead of importing it.
 - {doc}`concepts/differentiation` — AD modes, adjoints and sparsity.
 - {doc}`guides/scenario` — assembly, formulations and initial guesses.
 - {doc}`guides/benchmarking` — comparing methods on a real problem.
+- {doc}`guides/uncertainty` — what a wrong forecast costs, and what to do about it.
 - {doc}`reference/index` — the full API.
 
 ```{toctree}
@@ -89,6 +90,7 @@ guides/dynamics
 guides/outputs
 guides/scenario
 guides/benchmarking
+guides/uncertainty
 ```
 
 ```{toctree}

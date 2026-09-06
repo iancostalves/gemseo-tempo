@@ -94,7 +94,15 @@ from gemseo_tempo.problems.albatross.statics import AIR_DENSITY
 from gemseo_tempo.problems.albatross.statics import GRAVITY
 
 ROUGHNESS = 0.03
-"""The roughness length of the sea surface, in m."""
+"""The nominal roughness length of the sea surface, in m.
+
+Poorly known, and the parameter the whole problem turns on: the wind
+profile is logarithmic in the height over this length, so it sets how
+steep the gradient is at the height the bird flies, and the gradient is
+where all the energy comes from. It varies with the sea state over
+something like a factor of six, which is why it carries a distribution and
+why the dynamics take it as a parameter rather than reading this constant.
+"""
 
 REFERENCE_HEIGHT = 10.0
 """The height at which the reference wind speed is quoted, in m."""
@@ -108,7 +116,7 @@ before the logarithm is taken.
 """
 
 LOG_RATIO = float(jnp.log(REFERENCE_HEIGHT / ROUGHNESS))
-"""The logarithm that normalizes the profile to the reference height."""
+"""The logarithm that normalizes the nominal profile to the reference height."""
 
 REGISTRY = VariableRegistry(
     [
@@ -177,7 +185,28 @@ REGISTRY = VariableRegistry(
             unit="m/s",
             lower_bound=0.0,
             upper_bound=40.0,
+            distribution={
+                "name": "OTNormalDistribution",
+                "mu": 22.0,
+                "sigma": 2.2,
+            },
             tags=frozenset({"design", "objective"}),
+        ),
+        Variable(
+            name="roughness",
+            full_name="Surface roughness length",
+            description=(
+                "The length the logarithmic wind profile is measured"
+                " against; a property of the sea state, not of the bird."
+            ),
+            unit="m",
+            lower_bound=1e-4,
+            distribution={
+                "name": "OTLogNormalDistribution",
+                "mu": 0.03,
+                "sigma": 0.012,
+            },
+            tags=frozenset({"constant"}),
         ),
         Variable(
             name="specific_energy",
@@ -224,7 +253,7 @@ REGISTRY = VariableRegistry(
 """The metadata of every variable of the dynamics."""
 
 
-def wind_speed(height, w_ref):
+def wind_speed(height, w_ref, roughness=ROUGHNESS):
     """Return the wind speed at a height.
 
     The profile is logarithmic, which is what a boundary layer over open
@@ -238,6 +267,11 @@ def wind_speed(height, w_ref):
         The height above the surface, in m.
     w_ref
         The wind speed at :data:`REFERENCE_HEIGHT`, in m/s.
+    roughness
+        The roughness length of the surface, in m; :data:`ROUGHNESS` when
+        omitted. Note that it cancels only at the reference height, so a
+        rougher sea does not merely rescale the profile, it changes its
+        shape.
 
     Returns
     -------
@@ -245,10 +279,10 @@ def wind_speed(height, w_ref):
         The wind speed, in m/s.
     """
     floored = smooth_max(height, MIN_HEIGHT, 1e-3)
-    return w_ref * jnp.log(floored / ROUGHNESS) / LOG_RATIO
+    return w_ref * jnp.log(floored / roughness) / jnp.log(REFERENCE_HEIGHT / roughness)
 
 
-def wind_gradient(height, w_ref):
+def wind_gradient(height, w_ref, roughness=ROUGHNESS):
     """Return the rate of change of wind speed with height.
 
     Parameters
@@ -257,6 +291,8 @@ def wind_gradient(height, w_ref):
         The height above the surface, in m.
     w_ref
         The wind speed at :data:`REFERENCE_HEIGHT`, in m/s.
+    roughness
+        The roughness length of the surface, in m.
 
     Returns
     -------
@@ -264,7 +300,7 @@ def wind_gradient(height, w_ref):
         The gradient ``dW/dh``, in 1/s.
     """
     floored = smooth_max(height, MIN_HEIGHT, 1e-3)
-    return w_ref / (floored * LOG_RATIO)
+    return w_ref / (floored * jnp.log(REFERENCE_HEIGHT / roughness))
 
 
 def _scalars(theta):
@@ -329,7 +365,8 @@ def create_state_space() -> StateSpace:
         theta = _scalars(theta)
         lift, drag = _forces(s, u, theta)
         mass = theta["mass"]
-        gradient = wind_gradient(s["h"], theta["w_ref"])
+        roughness = theta["roughness"]
+        gradient = wind_gradient(s["h"], theta["w_ref"], roughness)
 
         climb_rate = s["V"] * jnp.sin(s["gamma"])
         # The air the bird is flying through is itself accelerating, because
@@ -338,7 +375,7 @@ def create_state_space() -> StateSpace:
 
         return {
             "x": s["V"] * jnp.cos(s["gamma"]) * jnp.cos(s["psi"])
-            + wind_speed(s["h"], theta["w_ref"]),
+            + wind_speed(s["h"], theta["w_ref"], roughness),
             "y": s["V"] * jnp.cos(s["gamma"]) * jnp.sin(s["psi"]),
             "h": climb_rate,
             "V": -drag / mass
@@ -356,8 +393,9 @@ def create_state_space() -> StateSpace:
         theta = _scalars(theta)
         lift, drag = _forces(s, u, theta)
         mass = theta["mass"]
-        wind = wind_speed(s["h"], theta["w_ref"])
-        gradient = wind_gradient(s["h"], theta["w_ref"])
+        roughness = theta["roughness"]
+        wind = wind_speed(s["h"], theta["w_ref"], roughness)
+        gradient = wind_gradient(s["h"], theta["w_ref"], roughness)
 
         # Ground speed is the air-relative velocity plus the wind, which
         # blows along x, so only the x component picks the wind up.
@@ -385,6 +423,7 @@ def create_state_space() -> StateSpace:
         controls=["cl", "mu"],
         parameters=[
             "w_ref",
+            "roughness",
             "mass",
             "wing_area",
             "induced_factor",

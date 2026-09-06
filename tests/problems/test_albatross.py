@@ -213,6 +213,7 @@ def test_the_energy_budget_closes(w_ref):
     statics = create_statics()(DESIGN_DEFAULTS)
     theta = {
         "w_ref": w_ref,
+        "roughness": ROUGHNESS,
         "mass": float(statics["mass"]),
         "wing_area": DESIGN_DEFAULTS["wing_area"],
         "induced_factor": float(statics["induced_factor"]),
@@ -667,10 +668,18 @@ def test_multi_start_confirms_the_seeded_guess_is_close_to_the_best():
 
     Every number in this problem comes from a single inverse-dynamics
     guess, which is a strong start and therefore a suspicious one. Random
-    starts over a Latin hypercube are the check, and they do find slightly
-    better cycles: the seeded optimum is marginally local, by well under a
-    percent. The basin is broad rather than the guess being wrong, which is
-    what the tolerance below asserts.
+    starts over a Latin hypercube are the check, and what they establish is
+    that the basin is broad: three of them land within a fraction of a
+    percent of the seeded optimum, in either direction.
+
+    Which direction is luck, and this test used to claim otherwise. It
+    asserted that wider search never does worse, which is not a property
+    three random starts have on a problem with several local optima:
+    ``MultiStart`` returns the best of what it happened to find, and a
+    strong seeded guess can beat that. The claim held until an unrelated
+    change perturbed the arithmetic in its last bits, which was enough to
+    send one start to a different optimum. The agreement is the evidence
+    here; the sign of the difference is not.
     """
     _, seeded_scenario = create_codesign_optimization(size=10)
     seeded_scenario.execute(algo_name="SLSQP", max_iter=400)
@@ -686,8 +695,8 @@ def test_multi_start_confirms_the_seeded_guess_is_close_to_the_best():
         max_iter=3000,
     )
     sampled = float(sampled_scenario.optimization_result.f_opt)
-    # Searching more widely never does worse, and here does slightly better.
-    assert sampled <= seeded + 1e-3
+    # Both are cycles that close, and they agree closely enough that the
+    # seeded guess can be trusted to stand for the problem.
     assert sampled == pytest.approx(seeded, rel=0.05)
 
 

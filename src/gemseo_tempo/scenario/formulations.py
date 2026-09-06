@@ -48,6 +48,8 @@ class BaseFormulationBuilder:
         scenario: DynamicScenario,
         maximize: bool = False,
         bounds: dict[str, tuple[float, float]] | None = None,
+        extra_disciplines: Sequence = (),
+        extra_constraints: Sequence[tuple[str, str]] = (),
     ) -> None:
         """Store the scenario.
 
@@ -60,10 +62,21 @@ class BaseFormulationBuilder:
         bounds
             Explicit ``(lower, upper)`` bounds per design-variable name,
             overriding the registry.
+        extra_disciplines
+            Disciplines to chain after the scenario's own, taking the same
+            design variables and producing further outputs. This is what
+            lets a trajectory be optimized against something the
+            transcription does not compute, a statistic over a sample of
+            uncertain parameters being the case it was added for.
+        extra_constraints
+            ``(output name, constraint type)`` pairs from those
+            disciplines, wired in alongside the transcription's own.
         """
         self.scenario = scenario
         self.maximize = maximize
         self.bounds = dict(bounds or {})
+        self.extra_disciplines = list(extra_disciplines)
+        self.extra_constraints = list(extra_constraints)
 
     def _design_variable_names(self) -> list[str]:
         """Return the names of the design variables of this formulation.
@@ -159,14 +172,15 @@ class BaseFormulationBuilder:
         """
         formulation_settings.setdefault("formulation_name", "DisciplinaryOpt")
         problem = self.scenario.problem
+        disciplines = [*self.scenario.disciplines, *self.extra_disciplines]
         gemseo_scenario = create_scenario(
-            self.scenario.disciplines,
+            disciplines,
             objective_name=problem.objective_name,
             design_space=self.create_design_space(),
             maximize_objective=self.maximize,
             **formulation_settings,
         )
-        for name, kind in problem.constraint_names:
+        for name, kind in (*problem.constraint_names, *self.extra_constraints):
             gemseo_scenario.add_constraint(name, constraint_type=kind)
         if compile_jit:
             # Order matters: building the scenario and adding the
@@ -174,7 +188,7 @@ class BaseFormulationBuilder:
             # outputs, and declaring them rebuilds the jacobian function.
             # Compiling any earlier would leave that rebuilt jacobian
             # uncompiled.
-            for discipline in self.scenario.disciplines:
+            for discipline in disciplines:
                 discipline.compile_jit(pre_run=False)
         return gemseo_scenario
 
@@ -206,6 +220,7 @@ class SystemDesign(BaseFormulationBuilder):
         design_names: Sequence[str],
         maximize: bool = False,
         bounds: dict[str, tuple[float, float]] | None = None,
+        **settings,
     ) -> None:
         """Store the design constants.
 
@@ -221,13 +236,16 @@ class SystemDesign(BaseFormulationBuilder):
         bounds
             Explicit ``(lower, upper)`` bounds per design-variable name,
             overriding the registry.
+        **settings
+            Forwarded to :class:`.BaseFormulationBuilder`, which is where
+            the extra disciplines and constraints are declared.
 
         Raises
         ------
         ValueError
             If a design constant is not an input of the problem.
         """
-        super().__init__(scenario, maximize=maximize, bounds=bounds)
+        super().__init__(scenario, maximize=maximize, bounds=bounds, **settings)
         self.design_names = [CONSTANT_PREFIX + name for name in design_names]
         unknown = sorted(set(self.design_names) - set(scenario.problem.input_defaults))
         if unknown:

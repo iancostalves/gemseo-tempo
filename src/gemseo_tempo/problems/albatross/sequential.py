@@ -52,6 +52,7 @@ import jax.numpy as jnp
 
 from gemseo_tempo.dynamics.integrators import DiffraxIntegrator
 from gemseo_tempo.outputs.functionals import Mayer
+from gemseo_tempo.problems.albatross.model import ROUGHNESS
 from gemseo_tempo.problems.albatross.model import create_state_space
 from gemseo_tempo.problems.albatross.problem import REGISTRY
 from gemseo_tempo.problems.albatross.problem import WING_BOUNDS
@@ -444,7 +445,7 @@ def _vehicle_scenario(weights: dict[str, float], size: int = 6) -> DynamicScenar
         ),
         statics=create_statics(),
         registry=REGISTRY,
-        constants={"w_ref": 0.0, **_design_values(None)},
+        constants={"w_ref": 0.0, "roughness": ROUGHNESS, **_design_values(None)},
         t0=0.0,
         t1=guess.period,
     )

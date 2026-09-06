@@ -70,6 +70,7 @@ from gemseo_tempo.outputs.constraints import TerminalConstraint
 from gemseo_tempo.outputs.functionals import Mayer
 from gemseo_tempo.problems.albatross.model import MIN_HEIGHT
 from gemseo_tempo.problems.albatross.model import REGISTRY as DYNAMICS_REGISTRY
+from gemseo_tempo.problems.albatross.model import ROUGHNESS
 from gemseo_tempo.problems.albatross.model import create_state_space
 from gemseo_tempo.problems.albatross.model import wind_gradient
 from gemseo_tempo.problems.albatross.model import wind_speed
@@ -490,7 +491,7 @@ def create_energy_scenario(
         transcription=transcription,
         registry=REGISTRY,
         statics=create_statics(),
-        constants={"w_ref": w_ref, **values},
+        constants={"w_ref": w_ref, "roughness": ROUGHNESS, **values},
         t0=0.0,
         t1=1.0 if free_time else guess.period,
         **scenario_settings,
@@ -587,7 +588,7 @@ def create_codesign_scenario(
         transcription=transcription,
         registry=REGISTRY,
         statics=create_statics(),
-        constants={"w_ref": NOMINAL_WIND, **values},
+        constants={"w_ref": NOMINAL_WIND, "roughness": ROUGHNESS, **values},
         t0=0.0,
         t1=1.0,
     )

@@ -83,6 +83,13 @@ MARGIN = "margin"
 RELIABILITY = "reliability"
 """The output name suffix of an estimated probability of satisfaction."""
 
+SHORTFALL = "shortfall"
+"""The output name suffix of a reliability target minus the reliability.
+
+The reliability constraint in the form an optimizer wants it, negative
+when the target is met.
+"""
+
 
 def statistics_function(
     scenario,
@@ -92,12 +99,13 @@ def statistics_function(
     reduction: Callable | None = None,
     factor: float = 2.0,
     smoothing: float = 1.0,
+    target: float = 0.95,
     prefix: str = CONSTANT_PREFIX,
 ) -> Callable:
     """Build the statistics of one quantity as a function of the design.
 
     The returned function takes the design inputs the scenario already
-    knows by name and returns four numbers: the mean of the quantity over
+    knows by name and returns five numbers: the mean of the quantity over
     the sample, its standard deviation, the margin ``mean + factor * std``,
     and the smoothed probability that the quantity is not positive. It is
     an ordinary JAX function, so it composes, jits and differentiates like
@@ -127,13 +135,17 @@ def statistics_function(
         of the quantity. It has to be small against the spread of the
         quantity and large against nothing in particular; the result
         carries it so that a reader can see what was assumed.
+    target
+        The reliability the shortfall is measured against, so that the
+        reliability requirement reaches an optimizer in the form it wants:
+        one number, negative when the requirement is met.
     prefix
         The grammar prefix the uncertain names carry as inputs.
 
     Returns
     -------
     Callable
-        ``design -> dict`` of the four statistics.
+        ``design -> dict`` of the five statistics.
     """
     problem = scenario.problem
     defaults = dict(problem.input_defaults)
@@ -156,16 +168,108 @@ def statistics_function(
         values = mapped(design, sample)
         mean = jnp.mean(values)
         deviation = jnp.std(values)
+        # The logistic stands in for the indicator of "not positive".
+        # Sharp enough to be nearly it, smooth enough to differentiate.
+        reliability = jnp.mean(jax.nn.sigmoid(-values / smoothing))
         return {
             MEAN: mean,
             DEVIATION: deviation,
             MARGIN: mean + factor * deviation,
-            # The logistic stands in for the indicator of "not positive".
-            # Sharp enough to be nearly it, smooth enough to differentiate.
-            RELIABILITY: jnp.mean(jax.nn.sigmoid(-values / smoothing)),
+            RELIABILITY: reliability,
+            SHORTFALL: target - reliability,
         }
 
     return statistics
+
+
+def statistics_discipline(
+    scenario,
+    uncertain: Sequence[str],
+    sample,
+    quantity: str,
+    design_names: Sequence[str] | None = None,
+    reduction: Callable | None = None,
+    factor: float = 2.0,
+    smoothing: float = 1.0,
+    target: float = 0.95,
+    name: str = "uncertainty",
+    prefix: str = CONSTANT_PREFIX,
+):
+    """Wrap the statistics as a GEMSEO discipline over the design variables.
+
+    This is what turns a probability into a constraint an ordinary
+    optimizer can be handed. Chained after the scenario's own discipline it
+    sees the same design variables, and being a JAX discipline like every
+    other one here its Jacobian is exact: the optimizer gets the derivative
+    of a probability, not a finite difference of a noisy estimate of one.
+
+    Parameters
+    ----------
+    scenario
+        The dynamic scenario.
+    uncertain
+        The raw names of the uncertain inputs.
+    sample
+        The fixed sample the statistics are taken over.
+    quantity
+        The constraint output, satisfied when not positive.
+    design_names
+        The inputs to expose; the scenario's design variables when
+        omitted.
+    reduction
+        How to reduce a path constraint to a scalar.
+    factor
+        The multiple of the standard deviation in the margin.
+    smoothing
+        The width of the logistic standing in for the indicator.
+    target
+        The reliability the shortfall output is measured against.
+    name
+        The discipline name.
+    prefix
+        The grammar prefix of the uncertain inputs.
+
+    Returns
+    -------
+    JAXDiscipline
+        The discipline, one output per statistic, each named
+        ``"<quantity>.<statistic>"``.
+    """
+    from gemseo_jax.jax_discipline import JAXDiscipline
+
+    statistics = statistics_function(
+        scenario,
+        uncertain,
+        sample,
+        quantity,
+        reduction=reduction,
+        factor=factor,
+        smoothing=smoothing,
+        target=target,
+        prefix=prefix,
+    )
+    defaults = scenario.problem.input_defaults
+    names = list(design_names or scenario.problem.design_variables)
+
+    def function(inputs: dict) -> dict:
+        """Return the statistics, named as the discipline declares them."""
+        values = statistics({key: inputs[key] for key in names})
+        return {
+            f"{quantity}.{statistic}": jnp.atleast_1d(value)
+            for statistic, value in values.items()
+        }
+
+    return JAXDiscipline(
+        function=function,
+        input_names=names,
+        output_names=[
+            f"{quantity}.{statistic}"
+            for statistic in (MEAN, DEVIATION, MARGIN, RELIABILITY, SHORTFALL)
+        ],
+        default_inputs={key: defaults[key] for key in names},
+        differentiation_method=JAXDiscipline.DifferentiationMethod.REVERSE,
+        name=name,
+    )
 
 
 @dataclass
@@ -312,8 +416,10 @@ __all__ = [
     "MARGIN",
     "MEAN",
     "RELIABILITY",
+    "SHORTFALL",
     "Assessment",
     "assess",
     "format_assessments",
+    "statistics_discipline",
     "statistics_function",
 ]
