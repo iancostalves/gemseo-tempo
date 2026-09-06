@@ -105,6 +105,8 @@ object is documented once, under the module that defines it.
    :toctree: generated
 
    gemseo_tempo.uncertainty.batch
+   gemseo_tempo.uncertainty.estimators
+   gemseo_tempo.uncertainty.robust
    gemseo_tempo.uncertainty.sensitivity
    gemseo_tempo.uncertainty.spaces
 ```

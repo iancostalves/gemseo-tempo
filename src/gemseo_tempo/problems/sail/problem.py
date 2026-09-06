@@ -74,6 +74,77 @@ from gemseo_tempo.transcriptions.collocation import HermiteSimpson
 LEG_LENGTH = 800.0
 """The distance to the mark, in m."""
 
+NOMINAL_WIND_PARAMETERS = {"wind_scale": 1.0, "wind_veer": 0.0}
+"""The wind parameters of the nominal field: as generated, unrotated."""
+
+SAIL_ADJOINT = "Direct"
+"""The adjoint this problem is differentiated through, and not the default.
+
+The library's default RecursiveCheckpoint adjoint returns inexact
+derivatives here, and how inexact depends on how the reverse pass is
+wrapped. Measured at the downwind optimum against the exact sensitivity of
+the along-track miss to the wind strength (1241.15, which central
+differences reproduce to eight digits at two step sizes):
+
+===========================  ==================  ==================
+route                        RecursiveCheckpoint Direct
+===========================  ==================  ==================
+one cotangent (``grad``)     exact               exact
+``jacrev``, several outputs  +0.61%              exact
+that, under a ``vmap``       -8.95%              exact
+===========================  ==================  ==================
+
+Only the first route is safe under the checkpointed adjoint, and it is the
+one route GEMSEO does not take: a discipline Jacobian is a ``jacrev`` over
+every output at once. So the Jacobian this problem hands the optimizer is
+the middle row.
+
+What singles this problem out is the wind field. It is the only one whose
+right-hand side reads an interpolated
+:class:`~gemseo_tempo.dynamics.fields.SpatialField`, whose transpose is a
+scatter-add, and that is what the checkpointed reverse pass mishandles once
+it is itself batched. The brachistochrone and the albatross are exact under
+both adjoints at every route measured.
+
+The Direct adjoint unrolls the solve instead of checkpointing it and is
+exact everywhere measured. It costs about a third more to solve the
+downwind leg (23.0 s against 17.0 s at the default discretization), which
+is the price of an answer that is right.
+
+A caution about how this was found, because the first diagnosis was wrong.
+The two adjoints also disagreed at the *starting guess*, and that
+disagreement was not the adjoint at all: the polar had a corner at dead
+downwind (see :data:`~gemseo_tempo.problems.sail.polar._SHAPE`), the guess
+sails straight through it, and the two adjoints were landing on opposite
+sides of it. With the polar smooth, the guess is exact under both adjoints
+and only the optimum separates them. A one-sided derivative at a kink and a
+wrong derivative look identical from a single number.
+"""
+
+
+def sail_integrator(**settings) -> DiffraxIntegrator:
+    """Build an integrator for this problem, with the adjoint it needs.
+
+    Use this rather than :class:`.DiffraxIntegrator` directly. The default
+    adjoint gives wrong Jacobians on this problem, for the reasons
+    :data:`SAIL_ADJOINT` records, and :func:`create_scenario` refuses an
+    integrator carrying it.
+
+    Parameters
+    ----------
+    **settings
+        Settings forwarded to :class:`.DiffraxIntegrator`; ``adjoint``
+        defaults to :data:`SAIL_ADJOINT`.
+
+    Returns
+    -------
+    DiffraxIntegrator
+        The integrator.
+    """
+    settings.setdefault("adjoint", SAIL_ADJOINT)
+    return DiffraxIntegrator(**settings)
+
+
 LEGS = {
     # The wind blows east, so the mark to the east is dead downwind and the
     # mark to the west is dead upwind.
@@ -216,6 +287,8 @@ def create_scenario(
     wind_name: str = "uniform",
     enforce_no_go: bool = False,
     channel_half_width: float | None = None,
+    integrator=None,
+    check_adjoint: bool = True,
     **scenario_settings,
 ) -> DynamicScenario:
     """Build the sailing scenario for one transcription.
@@ -235,6 +308,23 @@ def create_scenario(
     wind_name
         The wind field, one of
         :data:`~gemseo_tempo.problems.sail.wind.WIND_FIELDS`.
+    enforce_no_go
+        Whether to add the no-go path constraint; off by default, since
+        the polar already denies the boat any speed inside the cone and
+        the constraint only forbids the crossing a tack is made of.
+    channel_half_width
+        The distance either side of the rhumb line the boat may use, in
+        m; unconstrained when omitted.
+    integrator
+        The execution model of the dynamics; an adaptive integrator with
+        the adjoint this problem needs when omitted. Worth passing when
+        the trajectory is to be evaluated many times over, where a fixed
+        step makes every evaluation cost the same; build it with
+        :func:`sail_integrator` so it carries the right adjoint.
+    check_adjoint
+        Whether to refuse an integrator whose adjoint gives wrong
+        Jacobians here. Only the test recording *why* it is wrong turns
+        this off.
     **scenario_settings
         Extra settings forwarded to :class:`.DynamicScenario`.
 
@@ -246,10 +336,23 @@ def create_scenario(
     Raises
     ------
     ValueError
-        If the leg is unknown.
+        If the leg is unknown, or the integrator carries an adjoint known
+        to be wrong on this problem.
     """
     if leg not in LEGS:
         raise ValueError(f"Unknown leg {leg!r}; use one of {sorted(LEGS)}.")
+    if (
+        check_adjoint
+        and integrator is not None
+        and str(getattr(integrator, "adjoint_method", SAIL_ADJOINT)) != SAIL_ADJOINT
+    ):
+        msg = (
+            "This problem must be differentiated through the"
+            f" {SAIL_ADJOINT} adjoint; see SAIL_ADJOINT for why the default"
+            " returns wrong Jacobians here. Build the integrator with"
+            " sail_integrator() to get it right."
+        )
+        raise ValueError(msg)
     guess = guess or default_guess(leg, wind_name)
     wind = create_wind(wind_name)
     state_space = create_state_space(wind)
@@ -278,13 +381,17 @@ def create_scenario(
     control = CubicControl("psi", nodes, default_params=guess.headings(size + 1))
     scenario = DynamicScenario(
         state_space=state_space,
-        integrator=DiffraxIntegrator(rtol=1e-8, atol=1e-8, n_save=size + 1),
+        integrator=integrator
+        or DiffraxIntegrator(
+            rtol=1e-8, atol=1e-8, n_save=size + 1, adjoint=SAIL_ADJOINT
+        ),
         controls=(control,),
         functionals=(Mayer("t_f", lambda t_final, states, theta: t_final),),
         constraints=path_constraints,
         boundary=boundary,
         transcription=transcription,
         registry=REGISTRY,
+        constants=NOMINAL_WIND_PARAMETERS,
         t0=0.0,
         t1=1.0,
         **scenario_settings,
@@ -320,7 +427,7 @@ def simulate_guess(state_space, guess: Guess, size: int = 25):
         {"x": 0.0, "y": 0.0},
         (control,),
         {"psi": control.default_params},
-        {},
+        dict(NOMINAL_WIND_PARAMETERS),
         0.0,
         guess.t_f,
     )

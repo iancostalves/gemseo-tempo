@@ -51,12 +51,36 @@ V = f(|TWA|) * g(TWS)
 with `f` a smooth table over the true wind angle and `g` a saturating factor
 so that speed does not grow without bound in strong wind.
 
-Two details matter. The table is **dense through the no-go transition**: a C2
-spline through a sparse table undershoots to `-0.12` there, and negative boat
-speed is something an optimizer will exploit cheerfully. Even densely sampled
-it dips slightly below zero, so the result is **clamped** with a smooth
-maximum against zero, which floors it at `+0.0008` while leaving the rest of
-the curve untouched.
+Three details matter. The table is **dense through the no-go transition**: a
+C2 spline through a sparse table undershoots to `-0.12` there, and negative
+boat speed is something an optimizer will exploit cheerfully. Even densely
+sampled it dips slightly below zero, so the result is **clamped** with a
+smooth maximum against zero, which floors it at `+0.0008` while leaving the
+rest of the curve untouched.
+
+The third is about the other end of the table, and it was a defect for
+several sprints before a Jacobian check found it. The polar is symmetric
+between tacks, so the obvious way to write it is to interpolate against the
+angle and fold the sign away with `abs`. That gives every value correctly and
+one derivative wrongly: the folded curve meets its own mirror image at dead
+downwind, where the table still has slope, so the model has a **corner at
+exactly 180 degrees** that the physics does not. It sits in the middle of a
+downwind leg, which is where this problem spends its time, and it is
+invisible in every value the model reports.
+
+The table is therefore interpolated against the **cosine** of the wind angle
+rather than against the angle. The cosine is even and stationary at both ends,
+so symmetry between tacks is automatic and the curve is smooth through dead
+downwind and head to wind alike. Every tabulated point is reproduced exactly;
+only the shape between them changes, and only near the ends. The measurable
+consequence is that `d(speed)/d(TWA)` at 180 degrees is now zero instead of
+`0.0027` per degree, and the best gybing angle moves from 151.8 to 153.9
+degrees.
+
+This is the same kind of error as the lift limit that turned out to be a
+hardcoded bound in the albatross: a modelling artefact that produces numbers
+which look like physics. Neither shows up in a value; both show up in a
+derivative.
 
 ## Why gybing pays
 
@@ -75,10 +99,10 @@ For this polar, in 10 m/s of wind:
 | sailing | TWA | boat speed | speed made good |
 | --- | --- | --- | --- |
 | dead downwind | 180 deg | 4.50 m/s | 4.50 m/s |
-| best gybing angle | 151.8 deg | 5.71 m/s | 5.03 m/s |
+| best gybing angle | 153.9 deg | 5.62 m/s | 5.05 m/s |
 
-So gybing is worth **11.7%** in principle, and over the 800 m leg that is
-159.1 s against 177.8 s sailed straight. `best_vmg_angle` computes the angle,
+So gybing is worth **12.2%** in principle, and over the 800 m leg that is
+158.4 s against 177.8 s sailed straight. `best_vmg_angle` computes the angle,
 and it is what the default starting point is built from.
 
 ## What the optimizer finds
@@ -86,16 +110,30 @@ and it is what the default starting point is built from.
 Both direct transcriptions find the gybe, from a starting guess that only
 knows the best VMG angle and not the trajectory:
 
-| transcription | nodes | time | above the ideal |
-| --- | --- | --- | --- |
-| collocation | 25 | 160.27 s | 0.74% |
-| single shooting | 25 | 159.40 s | 0.19% |
-| single shooting | 40 | 159.30 s | 0.13% |
+| transcription | nodes | time | above the ideal 158.4 s | widest point |
+| --- | --- | --- | --- | --- |
+| collocation | 25 | 161.71 s | 2.09% | 102.1 m |
+| collocation | 40 | 162.07 s | 2.32% | 86.6 m |
+| single shooting | 25 | 158.81 s | 0.26% | 189.4 m |
+| single shooting | 40 | 158.68 s | 0.18% | 192.1 m |
 
-Against the 177.78 s straight run, that is a **10% gain**, and it lands within
-a fraction of a percent of the theoretical VMG optimum. The heading history
-comes back symmetric about the bearing to the mark, near `+29` and `-29`
-degrees, which is exactly the best VMG angle expressed as a heading.
+Against the 177.78 s straight run, shooting is a **10.7% gain** landing within
+a quarter of a percent of the theoretical VMG optimum. The heading history
+comes back symmetric about the bearing to the mark, near `+26` and `-26`
+degrees, which is the best VMG angle of 153.9 degrees expressed as a heading;
+sailing half the leg on each of those tacks puts the widest point at about
+`400 * tan(26.1 deg)`, or 196 m, which is what shooting finds.
+
+Collocation does **not** find it, and got worse when the polar was smoothed:
+it stops around 102 m across and 2% above the ideal, and adding nodes does not
+help. That is a local optimum rather than a discretization error, and the
+smoothing is what made it reachable. The old polar had a corner at dead
+downwind with slope `0.0027` per degree on either side, which pushed a
+trajectory off the wind axis; without it the region near dead downwind is flat
+to first order, the gybe angle is less sharply determined, and collocation
+settles for a narrower one. The corner was making the problem easier by being
+wrong. Shooting, which integrates the dynamics rather than treating the states
+as design variables, is unaffected.
 
 ## The path constraint
 
@@ -119,6 +157,41 @@ a boat pointed inside the cone essentially no speed, which is the physical
 reason it cannot go there, and a hard constraint on top of that forbids the
 brief crossing that a tack is made of. It is available as `enforce_no_go` for
 the cases where the explicit constraint is wanted.
+
+## The adjoint this problem needs
+
+This is the only problem in the library that does not use the library's
+default adjoint, and the only one whose right-hand side reads an interpolated
+[`SpatialField`][gemseo_tempo.dynamics.fields.SpatialField]. Interpolation
+gathers from the grid; its transpose scatters back into it; and diffrax's
+`RecursiveCheckpoint` adjoint gets that wrong once the reverse pass is itself
+batched. Measured at the downwind optimum, against the sensitivity of the
+along-track arrival point to the wind strength that central differences give
+as `1241.15` at two step sizes:
+
+| how the derivative is taken | RecursiveCheckpoint | Direct |
+| --- | --- | --- |
+| one cotangent, `jax.grad` | exact | exact |
+| `jax.jacrev`, several outputs at once | +0.61% | exact |
+| a `vmap` over that | -8.95% | exact |
+
+Nothing raises and no value is wrong; only derivatives are. The middle row is
+the one that matters in practice, because a GEMSEO discipline Jacobian *is* a
+`jacrev` over every output at once. So `create_scenario` builds the integrator
+with the `Direct` adjoint, and **refuses** one handed to it that carries the
+default, since passing an integrator is the ordinary way to fix a step size
+and doing so used to lose the correction without a word. Build one with
+`sail_integrator()`. The Direct adjoint unrolls the solve rather than
+checkpointing it and costs about a third more (23.0 s against 17.0 s on the
+downwind leg).
+
+Worth recording how this was found, because the first diagnosis was wrong. The
+two adjoints also disagreed at the starting guess, and that disagreement was
+not the adjoint: it was the polar's corner at dead downwind, which the guess
+sails straight through, with the two adjoints landing on opposite sides of it.
+Only once the polar was smooth did the guess agree under both and the real
+effect show up alone at the optimum. From a single number, a one-sided
+derivative at a kink and a wrong derivative look exactly the same.
 
 ## Two things that had to be got right
 

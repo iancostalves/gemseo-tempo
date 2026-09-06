@@ -12,7 +12,26 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this program; if not, write to the Free Software Foundation,
 # Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
-"""Gridded spatial fields, jit- and grad-safe (e.g. wind fields)."""
+"""Gridded spatial fields, jit- and grad-safe (e.g. wind fields).
+
+.. warning::
+
+   A field read inside an ODE right-hand side does not survive diffrax's
+   RecursiveCheckpoint adjoint intact when the reverse pass is batched.
+   Interpolation gathers from the grid, its transpose scatters back into
+   it, and a batched checkpointed reverse pass gets that wrong: on the
+   sailing problem the sensitivity of the arrival point to the wind
+   strength comes back 0.6% off through a plain ``jax.jacrev``, which is
+   what every GEMSEO discipline Jacobian is, and 9% off through a
+   ``vmap`` over one. Nothing raises, and the values themselves are
+   right.
+
+   Build the integrator with ``adjoint="Direct"`` for a model that reads
+   a field. It unrolls the solve rather than checkpointing it, is exact
+   in every case measured, and costs about a third more to solve.
+   :data:`~gemseo_tempo.problems.sail.problem.SAIL_ADJOINT` records the
+   measurements.
+"""
 
 from __future__ import annotations
 

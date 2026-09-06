@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING
 
 import jax
@@ -84,7 +85,7 @@ def freeze_design(scenario, gemseo_scenario, nominal=None, prefix=CONSTANT_PREFI
     return scenario
 
 
-def _quantity(outputs, name: str):
+def _quantity(outputs, name: str, reductions=None):
     """Return one output as a scalar.
 
     Parameters
@@ -93,13 +94,35 @@ def _quantity(outputs, name: str):
         The output dictionary of the transcribed problem.
     name
         The output name.
+    reductions
+        How to reduce outputs that are not already scalar, by name. A path
+        constraint is one value per node, and which scalar it should
+        become is the caller's decision rather than this module's: the
+        worst violation along the trajectory is the usual answer, but so
+        is the violation at a particular instant.
 
     Returns
     -------
     Array
         The value, reduced to a scalar.
+
+    Raises
+    ------
+    ValueError
+        If the output is not scalar and no reduction is given for it.
     """
-    return jnp.reshape(outputs[name], ())
+    value = outputs[name]
+    reduce = (reductions or {}).get(name)
+    if reduce is not None:
+        return jnp.reshape(reduce(value), ())
+    if jnp.size(value) != 1:
+        msg = (
+            f"The output {name!r} has {jnp.size(value)} components, so it is"
+            " not a quantity of interest on its own; pass a reduction for it"
+            " saying which scalar it should become."
+        )
+        raise ValueError(msg)
+    return jnp.reshape(value, ())
 
 
 def batch_evaluator(
@@ -107,6 +130,7 @@ def batch_evaluator(
     uncertain: Sequence[str],
     quantities: Sequence[str],
     prefix: str = CONSTANT_PREFIX,
+    reductions=None,
 ) -> Callable:
     """Build a function evaluating many draws in one call.
 
@@ -122,6 +146,9 @@ def batch_evaluator(
         The output names to return.
     prefix
         The grammar prefix the uncertain names carry as inputs.
+    reductions
+        How to reduce any quantity that is not already scalar, by name;
+        see :func:`_quantity`.
 
     Returns
     -------
@@ -139,7 +166,7 @@ def batch_evaluator(
         for index, name in enumerate(names):
             inputs[name] = jnp.reshape(row[index], jnp.shape(defaults[name]))
         outputs = problem.jax_function(inputs)
-        return jnp.stack([_quantity(outputs, name) for name in quantities])
+        return jnp.stack([_quantity(outputs, name, reductions) for name in quantities])
 
     return jax.jit(jax.vmap(one))
 
@@ -149,6 +176,7 @@ def looped_evaluator(
     uncertain: Sequence[str],
     quantities: Sequence[str],
     prefix: str = CONSTANT_PREFIX,
+    reductions=None,
 ) -> Callable:
     """Build the same function, evaluating one draw at a time.
 
@@ -166,6 +194,8 @@ def looped_evaluator(
         The output names to return.
     prefix
         The grammar prefix.
+    reductions
+        How to reduce any quantity that is not already scalar, by name.
 
     Returns
     -------
@@ -185,7 +215,7 @@ def looped_evaluator(
             for index, name in enumerate(names):
                 inputs[name] = jnp.reshape(row[index], jnp.shape(defaults[name]))
             outputs = single(inputs)
-            rows.append([float(_quantity(outputs, q)) for q in quantities])
+            rows.append([float(_quantity(outputs, q, reductions)) for q in quantities])
         return numpy.asarray(rows)
 
     return loop
@@ -196,6 +226,7 @@ def batch_jacobian(
     uncertain: Sequence[str],
     quantities: Sequence[str],
     prefix: str = CONSTANT_PREFIX,
+    reductions=None,
 ) -> Callable:
     """Build a function giving the derivatives of a whole sample at once.
 
@@ -208,6 +239,20 @@ def batch_jacobian(
     rather than falling back. A scenario built with the Direct adjoint
     could be differentiated either way, but nothing here needs it to be.
 
+    One pass **per quantity**, deliberately, rather than one ``jacrev``
+    over a stacked output. The two are the same derivative and should be
+    the same number, and on the sail they are not: ``jacrev`` batches the
+    reverse pass over the output basis, and a ``vmap`` over the sample
+    batches it again. Pushed through diffrax's RecursiveCheckpoint adjoint
+    that doubly-batched pass comes back about nine percent wrong at the
+    downwind optimum, silently. Taking one cotangent at a time and mapping
+    *that* over the sample agrees with finite differences to ten digits
+    under both adjoints.
+
+    So this is the safe route rather than merely a tidy one. It costs
+    nothing when the quantities are few, which they are: the quantities of
+    interest are the ones a designer names, not the whole trajectory.
+
     Parameters
     ----------
     scenario
@@ -218,6 +263,8 @@ def batch_jacobian(
         The output names to differentiate.
     prefix
         The grammar prefix.
+    reductions
+        How to reduce any quantity that is not already scalar, by name.
 
     Returns
     -------
@@ -228,15 +275,23 @@ def batch_jacobian(
     defaults = dict(problem.input_defaults)
     names = [prefix + name for name in uncertain]
 
-    def one(row):
-        """Evaluate a single draw."""
+    def scalar(row, quantity):
+        """Evaluate a single draw, returning one quantity as a scalar."""
         inputs = dict(defaults)
         for index, name in enumerate(names):
             inputs[name] = jnp.reshape(row[index], jnp.shape(defaults[name]))
-        outputs = problem.jax_function(inputs)
-        return jnp.stack([_quantity(outputs, name) for name in quantities])
+        return _quantity(problem.jax_function(inputs), quantity, reductions)
 
-    return jax.jit(jax.vmap(jax.jacrev(one)))
+    gradients = [
+        jax.vmap(jax.grad(partial(scalar, quantity=quantity)))
+        for quantity in quantities
+    ]
+
+    def jacobian(sample):
+        """Stack the gradient of each quantity over the whole sample."""
+        return jnp.stack([gradient(sample) for gradient in gradients], axis=1)
+
+    return jax.jit(jacobian)
 
 
 @dataclass

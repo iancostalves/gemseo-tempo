@@ -35,6 +35,10 @@ prevent it: the table is dense through the transition, which brings the
 undershoot down to about -0.03, and the result is clamped with
 :func:`~gemseo_tempo.dynamics.tables.smooth_max`, which floors it just
 above zero without introducing a kink.
+
+It also needs care at the other end, for a reason that took a Jacobian
+check to find: see :data:`_SHAPE` on why the table is interpolated against
+the cosine of the wind angle rather than against the angle.
 """
 
 from __future__ import annotations
@@ -96,7 +100,25 @@ gybing.
 REFERENCE_WIND = 10.0
 """The wind speed at which the saturation factor is one, in m/s."""
 
-_SHAPE = smooth_table(jnp.asarray(TWA_TABLE), jnp.asarray(SPEED_TABLE))
+_COSINE_TABLE = jnp.cos(jnp.radians(jnp.asarray(TWA_TABLE)))[::-1]
+"""The table angles as cosines, ascending from dead downwind to head to wind."""
+
+_SHAPE = smooth_table(_COSINE_TABLE, jnp.asarray(SPEED_TABLE)[::-1])
+"""The polar interpolated against the *cosine* of the true wind angle.
+
+Interpolating against the angle itself and folding with ``abs`` gives the
+right values and the wrong derivatives. The polar is symmetric between
+tacks, so the folded curve meets its mirror image at dead downwind, where
+the table still has slope: the result is a corner at exactly 180 degrees,
+in the model rather than in the physics, and it sits in the middle of a
+downwind leg. It is a corner the same way the lift limit was a hardcoded
+bound: not visible in any value the model reports, only in the derivatives.
+
+The cosine is even and stationary at both ends, so composing the table with
+it is symmetric between tacks by construction and smooth through dead
+downwind and head to wind alike. Every tabulated point is reproduced
+exactly; only the shape between them changes, and only near the ends.
+"""
 
 
 def speed_shape(twa_degrees):
@@ -105,8 +127,8 @@ def speed_shape(twa_degrees):
     Parameters
     ----------
     twa_degrees
-        The true wind angle in degrees; the sign is ignored, so the polar
-        is symmetric between tacks.
+        The true wind angle in degrees; the polar is symmetric between
+        tacks, and taking the cosine makes it so without a fold.
 
     Returns
     -------
@@ -114,10 +136,7 @@ def speed_shape(twa_degrees):
         The boat speed as a fraction of the true wind speed, never
         negative.
     """
-    folded = jnp.abs(twa_degrees)
-    # Beyond 180 degrees the angle folds back towards the wind.
-    folded = 180.0 - jnp.abs(180.0 - folded)
-    return smooth_max(_SHAPE(folded), 0.0, 1e-6)
+    return smooth_max(_SHAPE(jnp.cos(jnp.radians(twa_degrees))), 0.0, 1e-6)
 
 
 def wind_saturation(tws):

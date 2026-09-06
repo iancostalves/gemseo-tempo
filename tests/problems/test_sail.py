@@ -18,9 +18,12 @@ from __future__ import annotations
 
 import logging
 
+import jax
+import jax.numpy as jnp
 import numpy
 import pytest
 
+from gemseo_tempo.dynamics.integrators import DiffraxIntegrator
 from gemseo_tempo.problems.sail import LEGS
 from gemseo_tempo.problems.sail import NO_GO_ANGLE
 from gemseo_tempo.problems.sail import best_vmg_angle
@@ -35,6 +38,8 @@ from gemseo_tempo.problems.sail import plot_polar
 from gemseo_tempo.problems.sail import speed_shape
 from gemseo_tempo.problems.sail import straight_run_time
 from gemseo_tempo.problems.sail import true_wind_angle
+from gemseo_tempo.problems.sail.model import apply_wind_parameters
+from gemseo_tempo.problems.sail.problem import sail_integrator
 from gemseo_tempo.problems.sail.wind import EXTENT
 from gemseo_tempo.transcriptions import IndirectShooting
 from gemseo_tempo.transcriptions import SingleShooting
@@ -319,3 +324,138 @@ def test_the_no_go_constraint_marks_the_cone():
     assert value(0.0) < 0.0
     # Just outside the cone the constraint has already turned.
     assert value(numpy.pi - numpy.radians(NO_GO_ANGLE + 5.0)) < 0.0
+
+
+# ------------------------------------------- the wind parameters and the adjoint
+
+
+def test_the_wind_parameters_scale_and_turn_the_field():
+    """The field is fixed and the two parameters act on what it returns."""
+    wind = create_wind("uniform")
+    east, north = wind.velocity(0.0, 0.0)
+    doubled = apply_wind_parameters(east, north, {"wind_scale": 2.0})
+    assert float(doubled[0]) == pytest.approx(2.0 * float(east))
+    quarter = apply_wind_parameters(east, north, {"wind_veer": numpy.pi / 2.0})
+    # A quarter turn takes an eastward wind to a northward one.
+    assert float(quarter[0]) == pytest.approx(0.0, abs=1e-12)
+    assert float(quarter[1]) == pytest.approx(float(east))
+    # Absent parameters leave the field alone, so a field with no
+    # uncertainty declared still integrates.
+    same = apply_wind_parameters(east, north, {})
+    assert float(same[0]) == pytest.approx(float(east))
+
+
+def test_the_sail_jacobian_is_exact():
+    """The Jacobian this problem hands the optimizer matches finite differences.
+
+    This is the test whose absence let a wrong one through. The library's
+    default RecursiveCheckpoint adjoint returns an incorrect Jacobian on
+    this problem, and only on this one: it is wrong when the reverse pass
+    is batched over several outputs, which is exactly what ``jax.jacrev``
+    and therefore every GEMSEO discipline Jacobian does. The error is not
+    small and not only quantitative. Under that adjoint the cross-track
+    miss appears to respond to the wind *strength*, which the symmetry of
+    the leg forbids.
+
+    The problem defaults to the Direct adjoint for this reason, and this
+    test is what says so is still true.
+    """
+    scenario = create_scenario(
+        transcription=SingleShooting(),
+        size=8,
+        integrator=sail_integrator(dt0=1.0 / 200, n_save=9),
+    )
+    discipline = scenario.disciplines[0]
+    base = {
+        name: numpy.atleast_1d(numpy.asarray(value, dtype=float))
+        for name, value in scenario.problem.input_defaults.items()
+    }
+    discipline.linearize(base, compute_all_jacobians=True)
+    step = 1e-6
+    for output in ("constraint.final.x", "constraint.final.y"):
+        for name in ("constant.wind_scale", "constant.wind_veer", "t_f"):
+            analytic = float(numpy.ravel(discipline.jac[output][name])[0])
+            up = dict(base)
+            down = dict(base)
+            up[name] = base[name] + step
+            down[name] = base[name] - step
+            difference = (
+                float(numpy.ravel(discipline.execute(up)[output])[0])
+                - float(numpy.ravel(discipline.execute(down)[output])[0])
+            ) / (2.0 * step)
+            assert analytic == pytest.approx(difference, rel=1e-5, abs=1e-5)
+
+
+def test_the_default_adjoint_is_inexact_here_and_the_chosen_one_is_not():
+    """The reason the problem does not take the library default.
+
+    Kept as a test rather than a comment because it is the evidence: were
+    diffrax to fix the batched reverse pass, this test fails and the
+    override can be dropped.
+
+    The route probed is a ``vmap`` over a ``jacrev``, which is the one
+    that fails by a wide enough margin to assert on cheaply. A plain
+    ``jacrev``, which is what a discipline Jacobian is, fails by 0.6% and
+    only once the leg is solved; asserting on that would cost a solve.
+    """
+    exact = _cross_derivative("Direct")
+    checkpointed = _cross_derivative("RecursiveCheckpoint")
+    reference = _finite_difference()
+    assert exact == pytest.approx(reference, rel=1e-8)
+    assert abs(checkpointed - reference) > 0.01 * abs(reference)
+
+
+def _wind_scale_function(adjoint: str):
+    """Return the along-track miss as a function of the wind parameters."""
+    scenario = create_scenario(
+        transcription=SingleShooting(),
+        size=8,
+        integrator=DiffraxIntegrator(dt0=1.0 / 100, n_save=9, adjoint=adjoint),
+        check_adjoint=False,
+    )
+    problem = scenario.problem
+    defaults = dict(problem.input_defaults)
+
+    def value(row):
+        inputs = dict(defaults)
+        inputs["constant.wind_scale"] = jnp.reshape(row[0], (1,))
+        inputs["constant.wind_veer"] = jnp.reshape(row[1], (1,))
+        return jnp.reshape(problem.jax_function(inputs)["constraint.final.x"], ())
+
+    return value
+
+
+def _cross_derivative(adjoint: str) -> float:
+    """Differentiate through a vmap over a jacrev, the route that fails."""
+    value = _wind_scale_function(adjoint)
+
+    def stacked(row):
+        return jnp.stack([value(row)])
+
+    sample = jnp.asarray([[1.0, 0.0]])
+    return float(jax.jit(jax.vmap(jax.jacrev(stacked)))(sample)[0, 0, 0])
+
+
+def _finite_difference() -> float:
+    """The reference the derivative has to reproduce."""
+    value = _wind_scale_function("Direct")
+    row = jnp.asarray([1.0, 0.0])
+    step = 1e-5
+    return (float(value(row.at[0].add(step))) - float(value(row.at[0].add(-step)))) / (
+        2.0 * step
+    )
+
+
+def test_a_wrong_adjoint_is_refused_rather_than_used():
+    """The guard, which is what keeps the fix from being bypassed by accident.
+
+    Passing an integrator is the ordinary way to fix the step size for a
+    sampling study, and doing so used to hand the problem the default
+    adjoint again without a word.
+    """
+    with pytest.raises(ValueError, match="must be differentiated through"):
+        create_scenario(
+            transcription=SingleShooting(),
+            size=6,
+            integrator=DiffraxIntegrator(dt0=1.0 / 100, n_save=7),
+        )

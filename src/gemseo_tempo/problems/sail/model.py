@@ -31,6 +31,16 @@ opposite direction. The true wind angle is the angle between the heading
 and that "from" direction, so a true wind angle of zero is sailing
 straight into the wind and cannot be done, and 180 degrees is running
 straight downwind.
+
+The wind carries two parameters, and they are the reason the model has any
+at all. A sailor knows the shape of the breeze over the course far better
+than its strength or its exact direction: the gradient across the bay is a
+feature of the bay, while whether it is blowing twelve knots or fourteen,
+and whether it has veered five degrees since the start, are not known and
+will not be. So the field itself stays fixed and two numbers act on it,
+``wind_scale`` multiplying the whole field and ``wind_veer`` rotating it.
+Passing them as parameters rather than closing over them is what lets a
+whole sample of winds go through the dynamics in one call.
 """
 
 from __future__ import annotations
@@ -98,6 +108,38 @@ REGISTRY = VariableRegistry(
             lower_bound=0.0,
             tags=frozenset({"objective"}),
         ),
+        Variable(
+            name="wind_scale",
+            full_name="Wind strength factor",
+            description=(
+                "Multiplies the whole wind field. The shape of the breeze"
+                " over the course is a feature of the course and is known;"
+                " how hard it is blowing on the day is not."
+            ),
+            lower_bound=0.0,
+            distribution={
+                "name": "OTNormalDistribution",
+                "mu": 1.0,
+                "sigma": 0.12,
+            },
+            tags=frozenset({"constant"}),
+        ),
+        Variable(
+            name="wind_veer",
+            full_name="Wind direction shift",
+            description=(
+                "Rotates the whole wind field. A shift of a few degrees is"
+                " what a sailor cannot see coming and what decides which"
+                " gybe was the right one."
+            ),
+            unit="rad",
+            distribution={
+                "name": "OTNormalDistribution",
+                "mu": 0.0,
+                "sigma": 0.175,
+            },
+            tags=frozenset({"constant"}),
+        ),
     ]
 )
 """The metadata of every variable of the problem."""
@@ -143,6 +185,43 @@ def true_wind_angle(psi, east, north):
     return jnp.degrees(wrap_to_pi(psi - from_bearing))
 
 
+WIND_PARAMETERS = ("wind_scale", "wind_veer")
+"""The parameters acting on the wind field, in declaration order."""
+
+
+def apply_wind_parameters(east, north, theta):
+    """Scale and rotate a wind velocity by the uncertain parameters.
+
+    The field itself is fixed, so the two parameters act on whatever it
+    returns: a factor on the strength and a rotation of the direction.
+    Rotating the velocity rotates the bearing it comes from by the same
+    angle, which is what a veer is.
+
+    Parameters
+    ----------
+    east
+        The eastward component of the wind velocity, in m/s.
+    north
+        The northward component, in m/s.
+    theta
+        The parameters, read for ``wind_scale`` and ``wind_veer``; either
+        may be absent, in which case the field passes through unchanged.
+
+    Returns
+    -------
+    tuple
+        The transformed components, in m/s.
+    """
+    scale = jnp.reshape(theta.get("wind_scale", 1.0), ())
+    veer = jnp.reshape(theta.get("wind_veer", 0.0), ())
+    cosine = jnp.cos(veer)
+    sine = jnp.sin(veer)
+    return (
+        scale * (cosine * east - sine * north),
+        scale * (sine * east + cosine * north),
+    )
+
+
 def create_state_space(wind) -> StateSpace:
     """Build the state space of the boat on a given wind field.
 
@@ -154,13 +233,14 @@ def create_state_space(wind) -> StateSpace:
     Returns
     -------
     StateSpace
-        The model, with states ``x`` and ``y``, control ``psi``, and the
-        wind angle, wind speed and boat speed as outputs.
+        The model, with states ``x`` and ``y``, control ``psi``, the two
+        wind parameters, and the wind angle, wind speed and boat speed as
+        outputs.
     """
 
     def _sailing(t, s, u, theta):
         """Return the wind angle, wind speed and boat speed at a point."""
-        east, north = wind.velocity(s["x"], s["y"])
+        east, north = apply_wind_parameters(*wind.velocity(s["x"], s["y"]), theta)
         tws = jnp.hypot(east, north)
         twa = true_wind_angle(u["psi"], east, north)
         return twa, tws, boat_speed(twa, tws)
@@ -181,7 +261,7 @@ def create_state_space(wind) -> StateSpace:
     return StateSpace(
         states=["x", "y"],
         controls=["psi"],
-        parameters=[],
+        parameters=list(WIND_PARAMETERS),
         outputs=["twa", "tws", "speed"],
         rhs=rhs,
         output=output,
@@ -204,7 +284,7 @@ def no_go_constraint(wind):
     """
 
     def constraint(t, s, u, theta):
-        east, north = wind.velocity(s["x"], s["y"])
+        east, north = apply_wind_parameters(*wind.velocity(s["x"], s["y"]), theta)
         twa = true_wind_angle(u["psi"], east, north)
         # Sailing on either tack is fine, so only the magnitude matters.
         return NO_GO_ANGLE - jnp.sqrt(twa**2 + 1e-6)
