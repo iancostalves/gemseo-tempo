@@ -88,12 +88,27 @@ REGISTRY = VariableRegistry(
             full_name="Gravitational acceleration",
             unit="m/s**2",
             tags=frozenset({"constant"}),
+            # Known to a few parts in a thousand, and included precisely so
+            # a screening has something it should rank last.
+            distribution={
+                "name": "OTNormalDistribution",
+                "mu": 9.81,
+                "sigma": 0.02,
+            },
         ),
         Variable(
             name="mu",
             full_name="Coulomb friction coefficient",
             unit="dimensionless",
             lower_bound=0.0,
+            # Uniform rather than normal: the range is what is known about a
+            # sliding contact, and a normal would put mass on a negative
+            # friction coefficient.
+            distribution={
+                "name": "OTUniformDistribution",
+                "minimum": 0.02,
+                "maximum": 0.08,
+            },
             tags=frozenset({"constant"}),
         ),
         Variable(
@@ -102,6 +117,11 @@ REGISTRY = VariableRegistry(
             description="Quadratic drag coefficient divided by the bead mass.",
             unit="1/m",
             lower_bound=0.0,
+            distribution={
+                "name": "OTUniformDistribution",
+                "minimum": 0.03,
+                "maximum": 0.07,
+            },
             tags=frozenset({"constant"}),
         ),
         Variable(

@@ -98,6 +98,17 @@ object is documented once, under the module that defines it.
    gemseo_tempo.problems.sail.wind
 ```
 
+## Uncertainty
+
+```{eval-rst}
+.. autosummary::
+   :toctree: generated
+
+   gemseo_tempo.uncertainty.batch
+   gemseo_tempo.uncertainty.sensitivity
+   gemseo_tempo.uncertainty.spaces
+```
+
 ## Benchmarking
 
 ```{eval-rst}

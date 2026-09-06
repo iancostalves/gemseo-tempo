@@ -167,6 +167,7 @@ def create_scenario(
     guess: Guess | None = None,
     target: tuple[float, float] = TARGET,
     gravity: float = GRAVITY,
+    integrator=None,
     **scenario_settings,
 ) -> DynamicScenario:
     """Build the brachistochrone scenario for one transcription.
@@ -220,7 +221,8 @@ def create_scenario(
     )
     scenario = DynamicScenario(
         state_space=create_state_space(),
-        integrator=DiffraxIntegrator(rtol=1e-9, atol=1e-9, n_save=size + 1),
+        integrator=integrator
+        or DiffraxIntegrator(rtol=1e-9, atol=1e-9, n_save=size + 1),
         controls=controls,
         functionals=(Mayer("t_f", lambda t_final, states, theta: t_final),),
         boundary=boundary,
