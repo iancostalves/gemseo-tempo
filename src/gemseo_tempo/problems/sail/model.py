@@ -89,6 +89,11 @@ REGISTRY = VariableRegistry(
         Variable(
             name="tws",
             full_name="True wind speed",
+            description=(
+                "The strength of the wind over the water at the boat's"
+                " position, as opposed to the apparent wind a moving boat"
+                " feels."
+            ),
             unit="m/s",
             lower_bound=0.0,
             tags=frozenset({"output"}),
@@ -96,6 +101,12 @@ REGISTRY = VariableRegistry(
         Variable(
             name="speed",
             full_name="Boat speed",
+            description=(
+                "Speed through the water, read off the polar at the"
+                " current wind angle and wind speed. It is what makes"
+                " gybing pay: the boat gives up heading straight at the"
+                " mark in exchange for enough of this to arrive sooner."
+            ),
             unit="m/s",
             lower_bound=0.0,
             tags=frozenset({"output"}),

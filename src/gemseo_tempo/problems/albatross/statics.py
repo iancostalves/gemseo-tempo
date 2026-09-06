@@ -141,18 +141,32 @@ REGISTRY = VariableRegistry(
         Variable(
             name="wing_mass",
             full_name="Wing mass",
+            description=(
+                "What the wing itself weighs, growing with span and area."
+                " Without it nothing charges a design for reaching for"
+                " aspect ratio."
+            ),
             unit="kg",
             tags=frozenset({"statics"}),
         ),
         Variable(
             name="mass",
             full_name="Total mass",
+            description=(
+                "Body plus wing. The wing part grows with span and area,"
+                " so a wing that is better in cruise is heavier and needs"
+                " more lift to carry."
+            ),
             unit="kg",
             tags=frozenset({"statics"}),
         ),
         Variable(
             name="wing_area",
             full_name="Wing area",
+            description=(
+                "The reference area of the wing, one of the two variables"
+                " that shape it."
+            ),
             unit="m**2",
             lower_bound=0.3,
             upper_bound=1.2,
@@ -161,6 +175,11 @@ REGISTRY = VariableRegistry(
         Variable(
             name="wing_span",
             full_name="Wing span",
+            description=(
+                "Tip to tip. With the area it fixes the aspect ratio, and"
+                " through that both the induced drag and the chord the"
+                " Reynolds number is measured on."
+            ),
             unit="m",
             lower_bound=2.0,
             upper_bound=5.0,
@@ -213,11 +232,22 @@ REGISTRY = VariableRegistry(
         Variable(
             name="cd0",
             full_name="Zero-lift drag coefficient",
+            description=(
+                "Drag at zero lift, from the section and corrected for the"
+                " Reynolds number the wing actually flies at. A small bird"
+                " flies at a low Reynolds number, where this is worse."
+            ),
             tags=frozenset({"statics"}),
         ),
         Variable(
             name="cl_max",
             full_name="Maximum lift coefficient",
+            description=(
+                "The stall limit of the finite wing, which bounds the lift"
+                " coefficient in flight. It is what stops a design from"
+                " buying glide ratio without paying for manoeuvre: the"
+                " tight turns of a soaring cycle need it."
+            ),
             tags=frozenset({"statics"}),
         ),
         Variable(
@@ -235,6 +265,10 @@ REGISTRY = VariableRegistry(
         Variable(
             name="wing_loading",
             full_name="Wing loading",
+            description=(
+                "Weight per unit wing area, which sets how fast the bird"
+                " has to fly to hold itself up."
+            ),
             unit="Pa",
             tags=frozenset({"statics"}),
         ),

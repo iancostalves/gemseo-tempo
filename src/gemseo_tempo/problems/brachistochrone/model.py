@@ -86,6 +86,12 @@ REGISTRY = VariableRegistry(
         Variable(
             name="g",
             full_name="Gravitational acceleration",
+            description=(
+                "What drives the bead down the wire. Known to three"
+                " decimal places, and in the list of uncertainties on"
+                " purpose: a screening ought to be able to say that a"
+                " well-known parameter does not matter."
+            ),
             unit="m/s**2",
             tags=frozenset({"constant"}),
             # Known to a few parts in a thousand, and included precisely so
@@ -99,6 +105,11 @@ REGISTRY = VariableRegistry(
         Variable(
             name="mu",
             full_name="Coulomb friction coefficient",
+            description=(
+                "Sliding friction against the wire, opposing the motion"
+                " in proportion to the normal force. Zero in the classical"
+                " problem, which is why that one has a closed-form answer."
+            ),
             unit="dimensionless",
             lower_bound=0.0,
             # Uniform rather than normal: the range is what is known about a

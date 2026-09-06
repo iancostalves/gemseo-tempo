@@ -130,6 +130,11 @@ REGISTRY = VariableRegistry(
         Variable(
             name="y",
             full_name="Crosswind position",
+            description=(
+                "Displacement across the wind. The soaring cycle is closed"
+                " in every state including this one, so a cycle that"
+                " drifted sideways would not be a cycle."
+            ),
             unit="m",
             tags=frozenset({"state"}),
         ),
@@ -167,6 +172,12 @@ REGISTRY = VariableRegistry(
         Variable(
             name="cl",
             full_name="Lift coefficient",
+            description=(
+                "How hard the wing is worked, the first of the two"
+                " controls. Its upper bound is not a number in this file"
+                " but the stall limit the statics chain computes for the"
+                " wing being designed."
+            ),
             lower_bound=-0.2,
             upper_bound=1.5,
             tags=frozenset({"control"}),
@@ -231,6 +242,11 @@ REGISTRY = VariableRegistry(
         Variable(
             name="wind",
             full_name="Wind speed",
+            description=(
+                "The wind at the bird's current height, from the"
+                " logarithmic profile. Its variation with height, not its"
+                " value, is what the flight lives on."
+            ),
             unit="m/s",
             tags=frozenset({"output"}),
         ),

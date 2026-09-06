@@ -1,7 +1,10 @@
 # Brachistochrone
 
+```{variable-context} gemseo_tempo.problems.brachistochrone.model:REGISTRY
+```
+
 Minimum-time descent of a bead under gravity, in three physical variants.
-With `y` measured downward:
+With {var}`y <symbol>` measured downward:
 
 ```text
 dx/dt = v cos(gamma)
@@ -9,9 +12,24 @@ dy/dt = v sin(gamma)
 dv/dt = g (sin(gamma) - mu cos(gamma)) - (k/m) v^2
 ```
 
-The variants differ only in their constants: `mu = 0` and `k/m = 0` give the
-ideal frictionless case, a nonzero `mu` adds Coulomb friction, and a nonzero
-`k/m` adds quadratic drag.
+Three states and one control, generated from the registry:
+
+```{variables} gemseo_tempo.problems.brachistochrone.model:REGISTRY
+:filter: tags=state,control
+:columns: name, full_name, unit, bounds
+```
+
+The variants differ only in their constants, and those are where the
+uncertainty of this problem lives:
+
+```{variables} gemseo_tempo.problems.brachistochrone.model:REGISTRY
+:filter: tags=constant
+:columns: name, full_name, unit, distribution
+```
+
+Setting {var}`mu <symbol>` and `k/m` to zero gives the ideal frictionless
+case, a nonzero {var}`mu <symbol>` adds Coulomb friction, and a nonzero
+{var}`k_over_m <symbol>` adds quadratic drag.
 
 ```python
 from gemseo_tempo.problems.brachistochrone import create_optimization

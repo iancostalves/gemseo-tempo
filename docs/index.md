@@ -58,6 +58,7 @@ first principles instead of importing it.
 - {doc}`guides/scenario` — assembly, formulations and initial guesses.
 - {doc}`guides/benchmarking` — comparing methods on a real problem.
 - {doc}`guides/uncertainty` — what a wrong forecast costs, and what to do about it.
+- {doc}`reference/variables` — every variable, generated from the registries.
 - {doc}`reference/index` — the full API.
 
 ```{toctree}
@@ -108,6 +109,7 @@ problems/sail
 :hidden:
 :caption: Reference
 
+reference/variables
 reference/index
 ```
 

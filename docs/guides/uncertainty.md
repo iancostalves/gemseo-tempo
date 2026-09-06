@@ -13,6 +13,20 @@ that the literature describes as conditionally affordable are unconditionally
 affordable here, and the interesting question stops being which method you can
 pay for and becomes which method is right.
 
+Everything here is reproducible from one script:
+
+```bash
+python examples/uncertainty/run_uncertainty.py --analysis speedup screen
+python examples/uncertainty/run_uncertainty.py --analysis all
+```
+
+The examples are run by hand rather than executed when the documentation is
+built. A gallery that ran them would add tens of minutes of solver time to
+every push and every tag, and would fail the docs build whenever a solver
+had an off day, which the numbers on this page show is a real possibility.
+The measured figures are quoted here instead, and the ones that matter are
+checked against the code by `tests/test_docs.py`.
+
 ## Declaring an uncertainty
 
 An uncertain variable is declared where the variable is, in the problem's

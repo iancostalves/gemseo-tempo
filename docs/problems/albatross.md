@@ -1,5 +1,8 @@
 # Albatross dynamic soaring
 
+```{variable-context} gemseo_tempo.problems.albatross.model:REGISTRY
+```
+
 An albatross crosses oceans for days without flapping and without thermals. It
 does it by repeatedly climbing into the wind and diving back downwind through
 air that moves faster higher up. Each pass through the gradient takes a little
@@ -20,9 +23,24 @@ print(gemseo_scenario.optimization_result.f_opt)  # about 8.6 m/s
 
 ## The bird
 
-Six states place and orient a point mass: position `x` downwind, `y`
-crosswind, height `h`, then airspeed `V`, climb angle `gamma` and heading
-`psi`. The controls are the lift coefficient `C_L` and the bank angle `mu`.
+Six states place and orient a point mass, and two controls fly it. Both
+tables are generated from the registry the model itself reads, so they
+cannot drift from the code:
+
+```{variables} gemseo_tempo.problems.albatross.model:REGISTRY
+:filter: tags=state
+:columns: name, full_name, unit, bounds
+```
+
+```{variables} gemseo_tempo.problems.albatross.model:REGISTRY
+:filter: tags=control
+:columns: name, full_name, unit, bounds
+```
+
+Note what the bound on {var}`cl <symbol>` is not: a number written in this
+page or in the dynamics. It is the stall limit the statics chain computes
+for the wing being designed, which is what stops a design buying glide
+ratio without paying for the manoeuvre.
 
 ```text
 dx/dt = V cos(gamma) cos(psi) + W(h)

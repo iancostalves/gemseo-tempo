@@ -35,6 +35,27 @@ in what the optimizer sees, and that changes how they behave.
   - **No** — they change the necessary conditions
 ```
 
+## Which one to use
+
+The short answer, from the evidence gathered across the three problems
+rather than from first principles:
+
+| if | use | because |
+| --- | --- | --- |
+| the problem has a path constraint | shooting or collocation | the indirect method cannot express one without changing the necessary conditions |
+| the trajectory must respond to a parameter you will vary afterwards | **shooting** | under collocation the states are design variables, so a frozen design cannot react to a changed parameter at all |
+| the grid is fine and the dynamics are stiff | **collocation** | no ODE solve, and the defects spread the difficulty over the nodes |
+| you want the smallest possible problem and the physics are smooth | indirect | one costate per state, and it is the only one that returns a certificate of optimality |
+| you are about to sample or optimize under uncertainty | **shooting** | see the first two rows: the whole of {doc}`../guides/uncertainty` depends on it |
+
+The second row is the one that surprises people, and it cost this library a
+wasted afternoon before it was written down. Collocation treats the states as
+design variables constrained by defects. Freeze such a design and change a
+parameter, and the trajectory does not move: only the defects go out of
+balance. Every uncertainty study here therefore uses single shooting, not
+because it is more accurate but because it is the one whose answer depends on
+the parameter being varied.
+
 ## Single shooting
 
 The optimizer sees only the control parameters, so the problem stays small
@@ -108,3 +129,31 @@ worth stating up front:
 - Gradient-free optimization does not scale here. On collocation, COBYLA
   solved **8%** of starting points within 200 calls against **67%** for
   SLSQP.
+
+The harder problems separate them further, and not always in collocation's
+favour:
+
+| problem | shooting | collocation |
+| --- | --- | --- |
+| brachistochrone | the cycloid time, exactly | the cycloid time, exactly |
+| sail, downwind | 158.81 s, 0.26% above the ideal | 161.71 s, 2.09% above |
+| sail, upwind | 256.37 s at 25 nodes, 343.67 s at 40 | 300.13 s at 25, 258.05 s at 40 |
+
+On the sail's downwind leg collocation finds a **different and worse local
+optimum**: it gybes narrowly, 102 m across the course where shooting goes
+189 m, and adding nodes does not help. That gap opened when the polar was
+smoothed, and the reason is instructive. The old polar had a corner at dead
+downwind with a slope of 0.0027 per degree either side, which pushed a
+trajectory off the wind axis; without it the region is flat to first order,
+the best gybing angle is less sharply determined, and collocation settles for
+a narrower one. The corner had been making the problem easier by being wrong.
+
+Neither transcription solves the upwind leg reliably, and that is reported
+rather than tuned away: a tack has to cross head to wind, where the polar
+says the boat stops, and one smooth heading over a whole leg makes that
+crossing slow.
+
+Compiling is worth it in every case measured. The crossover, the number of
+evaluations after which the compiled discipline has repaid the compilation,
+is between **3 and 9** on all three problems, so any optimization at all
+pays for the compiler.

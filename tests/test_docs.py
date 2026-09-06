@@ -147,3 +147,52 @@ def test_documented_extras_match_the_packaging():
 def test_key_pages_are_not_empty_stubs(page):
     text = (DOCS / page).read_text(encoding="utf-8")
     assert len(text.splitlines()) > 20, f"{page} looks like a stub"
+
+
+@pytest.mark.parametrize(
+    "page", ["problems/albatross.md", "problems/brachistochrone.md", "problems/sail.md"]
+)
+def test_problem_pages_generate_their_variable_tables(page):
+    """The sprint's acceptance criterion, made executable.
+
+    A variable table written by hand is a copy of the registry, and a copy
+    of a number is a number that will be wrong later. Every problem page
+    therefore declares which model it is about and generates its tables
+    from that model's registry.
+    """
+    text = (DOCS / page).read_text(encoding="utf-8")
+    assert "```{variable-context}" in text, f"{page} declares no model"
+    assert "```{variables}" in text, f"{page} generates no variable table"
+
+
+def test_every_variable_the_pages_mention_is_declared():
+    """A mention of a name no registry has fails the documentation build.
+
+    The build enforces this, so this test exists to say what the rule is
+    and to catch it without a full Sphinx run.
+    """
+    import re
+    import sys
+
+    sys.path.insert(0, str(DOCS / "_ext"))
+    from tempo_myst import registry_label
+    from tempo_myst import walk_registries
+
+    declared: dict[str, set[str]] = {}
+    for target, registry in walk_registries("gemseo_tempo"):
+        declared.setdefault(registry_label(target), set()).update(registry)
+    every = set().union(*declared.values())
+
+    pattern = re.compile(r"\{var\}`([^`<]+?)(?:\s*<[^`>]*>)?`")
+    for path in DOCS.rglob("*.md"):
+        if "_build" in path.parts:
+            continue
+        for mention in pattern.findall(path.read_text(encoding="utf-8")):
+            name = mention.strip()
+            if ":" in name:
+                label, _, bare = name.partition(":")
+                assert bare in declared.get(label, set()), (
+                    f"{path.name} mentions {name!r}, which {label!r} has not"
+                )
+            else:
+                assert name in every, f"{path.name} mentions undeclared {name!r}"

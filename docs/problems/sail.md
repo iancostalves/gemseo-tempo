@@ -1,5 +1,8 @@
 # Sailing to a mark
 
+```{variable-context} gemseo_tempo.problems.sail.model:REGISTRY
+```
+
 Minimum-time sailing to a mark through a steady, spatially varying wind. The
 boat is a point moving over the water at whatever speed its polar allows at
 the wind angle it is being steered on:
@@ -35,6 +38,13 @@ wind angle is the angle between the heading and that "from" direction, so:
 | 0 deg | head to wind, which no boat can sail |
 | 90 deg | beam reach, across the wind |
 | 180 deg | dead downwind, running |
+
+The two states, the control and the quantities the trajectory reports:
+
+```{variables} gemseo_tempo.problems.sail.model:REGISTRY
+:filter: tags=state,control,output
+:columns: name, full_name, unit, description
+```
 
 The sign of the TWA says which tack the boat is on. The polar is symmetric in
 it, because the two tacks are equally fast.

@@ -66,3 +66,70 @@ convert(212.0, "degF", "degC")  # 100.0
 dictionary-to-dictionary function so it accepts and returns values in
 declared units while computing in base units. Keys absent from the mappings
 pass through untouched.
+
+## The documentation reads the same record
+
+The registry is not only for design spaces and unit conversion. The
+documentation reads it too, through a small Sphinx extension
+(`docs/_ext/tempo_myst.py`), so a page cannot quietly disagree with the model
+it describes. A hand-written variable table is a copy, and a copy of a number
+is a number that will be wrong later.
+
+Four pieces of grammar. A page first says which model it is about:
+
+````markdown
+```{variable-context} gemseo_tempo.problems.albatross.model:REGISTRY
+```
+````
+
+Then a mention is a role rather than backticks, and renders from the record:
+
+| written | rendered |
+| --- | --- |
+| `` {var}`V` `` | Airspeed (V, m/s) |
+| `` {var}`V <name>` `` | Airspeed |
+| `` {var}`V <symbol>` `` | V |
+| `` {var}`V <unit>` `` | m/s |
+| `` {var}`brachistochrone:mu` `` | Coulomb friction coefficient (mu, –) |
+
+Each one links to the variable's entry in the {doc}`generated glossary
+<../reference/variables>`, and carries its description as hover text.
+
+A table is generated rather than typed:
+
+````markdown
+```{variables} gemseo_tempo.problems.albatross.model:REGISTRY
+:filter: tags=state
+:columns: name, full_name, unit, bounds
+```
+````
+
+`:filter:` keeps the variables carrying any of the named tags, `:names:`
+selects them explicitly and in order, and `:columns:` chooses from `name`,
+`full_name`, `description`, `unit`, `bounds`, `lower_bound`, `upper_bound`,
+`tags` and `distribution`.
+
+**A name that no registry declares fails the build.** That is the point of
+the arrangement: the documentation is checked against the code rather than
+merely written alongside it. Set `tempo_unknown_variable = "warn"` in
+`conf.py` to downgrade it while a model is in flux.
+
+### Why variables are scoped by model
+
+Writing the grammar made a clash visible that prose had been hiding. The same
+grammar name means different things in different problems:
+
+| name | brachistochrone | sail | albatross |
+| --- | --- | --- | --- |
+| `x` | horizontal position | eastward position | downwind position |
+| `y` | depth | northward position | crosswind position |
+| `mu` | Coulomb friction coefficient | | bank angle |
+| `t_f` | descent time | time to the mark | |
+
+A single global glossary would have had to pick one of each and be wrong
+about the rest. So an entry belongs to a model, `{variable-context}` says
+which model a page is about, and a name that is unique across all of them
+still resolves without being told. Every registry of one problem shares a
+label and they are merged, because a page about the albatross should resolve
+the name of a wing variable as readily as the name of a state; the extension
+checks that the merged registries agree wherever they overlap.

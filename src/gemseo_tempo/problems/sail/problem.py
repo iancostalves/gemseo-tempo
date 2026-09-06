@@ -86,13 +86,13 @@ wrapped. Measured at the downwind optimum against the exact sensitivity of
 the along-track miss to the wind strength (1241.15, which central
 differences reproduce to eight digits at two step sizes):
 
-===========================  ==================  ==================
-route                        RecursiveCheckpoint Direct
-===========================  ==================  ==================
-one cotangent (``grad``)     exact               exact
-``jacrev``, several outputs  +0.61%              exact
-that, under a ``vmap``       -8.95%              exact
-===========================  ==================  ==================
+=========================== =================== ======
+route                       RecursiveCheckpoint Direct
+=========================== =================== ======
+one cotangent (``grad``)    exact               exact
+``jacrev``, several outputs +0.61%              exact
+that, under a ``vmap``      -8.95%              exact
+=========================== =================== ======
 
 Only the first route is safe under the checkpointed adjoint, and it is the
 one route GEMSEO does not take: a discipline Jacobian is a ``jacrev`` over
