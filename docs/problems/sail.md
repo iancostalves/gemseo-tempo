@@ -144,13 +144,28 @@ rather than fencing off a region the boat had no reason to enter:
 
 | half-width | time | furthest across |
 | --- | --- | --- |
-| unconstrained | 160.31 s | 180.9 m |
-| 250 m | 160.31 s | 180.9 m |
-| 150 m | 161.31 s | 149.3 m |
-| 80 m | 163.23 s | 80.0 m |
+| unconstrained | 158.81 s | 189.4 m |
+| 250 m | 158.81 s | 189.4 m |
+| 150 m | 160.24 s | 150.0 m |
+| 80 m | 161.86 s | 80.0 m |
 
 A limit the free optimum already respects leaves it untouched; tighter limits
 bind exactly, and cost time monotonically.
+
+Those numbers are the **best of several starting points**, and they have to be.
+Every entry here is a different local optimum depending on where the solve
+begins, and no single strategy wins at every width. Warm-starting from the
+unconstrained optimum is what gets 150 m to bind at 150.0 m rather than
+stalling at 98.2 m and a second slower; chaining that same design onward to
+80 m stalls instead at 42.0 m and 162.79 s, where a cold start from the
+polar-derived guess binds properly at 161.86 s. The guess sails a narrow gybe,
+so it is a good start for a narrow channel and a poor one for a wide one.
+
+This is not conditioning. Scaling the constraint by 1, by its own half-width
+and by the leg length gives byte-identical answers, and 800 and 2000 iterations
+give identical designs. It is the shape of the problem: the channel-constrained
+downwind leg has several local optima and the solver finds the one nearest
+where it started.
 
 The no-go cone gets **no** path constraint by default. The polar already gives
 a boat pointed inside the cone essentially no speed, which is the physical

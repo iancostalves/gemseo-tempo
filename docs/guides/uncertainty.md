@@ -162,16 +162,16 @@ failure is the most expensive kind.
 constraint an ordinary optimizer can be handed:
 
 ```python
-from gemseo_tempo.uncertainty.robust import statistics_discipline
+from gemseo_tempo.uncertainty.robust import robust_discipline
 from gemseo_tempo.scenario.formulations import OptimalControl
 
-discipline = statistics_discipline(
+discipline = robust_discipline(
     scenario, names, sample, "constraint.channel",
     reduction=jnp.max, target=0.95,
 )
 formulation = OptimalControl(
     scenario,
-    extra_disciplines=[discipline],
+    disciplines=[discipline],          # replaces, does not extend
     extra_constraints=[("constraint.channel.shortfall", "ineq")],
 )
 ```
@@ -180,7 +180,24 @@ Because the discipline is a JAX discipline like every other one here, the
 optimizer receives the **exact derivative of a probability**, not a finite
 difference of a noisy estimate of one.
 
-Two choices decide whether this works at all, and both are deliberate:
+Note that `robust_discipline` computes the trajectory *and* the statistics in
+one program, and that `disciplines` replaces the scenario's own rather than
+adding to them. Chaining a second discipline alongside the first is the
+obvious thing to try and it fails silently: a JAX discipline filters its
+Jacobian to the inputs and outputs GEMSEO declares to it, those declarations
+do not reach a discipline inside a chain, and an empty filter returns zeros
+rather than raising. Measured here, the objective and both terminal
+constraints came back with gradient exactly **zero** while the added
+constraint alone had one, and SLSQP stopped on its first iteration reporting
+a singular LSQ matrix. Nothing said the derivatives had gone.
+
+The cost is honest: every evaluation integrates the trajectory once per draw,
+so a 256-draw sample makes each iteration 257 integrations. That is what
+designing against a probability costs, and vectorizing is what makes it one
+dispatch rather than 257.
+
+Two further choices decide whether this works at all, and both are
+deliberate:
 
 - **The sample is fixed once** and reused at every iteration. With a fresh
   sample per iteration the statistic is noisy and the optimizer chases the
@@ -189,5 +206,48 @@ Two choices decide whether this works at all, and both are deliberate:
 - **The probability is smoothed.** An indicator has no useful gradient, so a
   logistic in the constraint value stands in for it. The width is a modelling
   choice, reported rather than buried: too wide and the constraint is not the
-  one you asked for, too narrow and the gradient vanishes again. On the sail it
-  agrees with the counted fraction to 3e-4.
+  one you asked for, too narrow and the gradient vanishes again. At the width
+  used below it agrees with the counted fraction to about a point.
+
+## What a safety margin costs
+
+The argument, on the sail downwind leg with a 150 m channel the boat has to
+stay inside, under an uncertain wind. Every design is measured on 4000 draws
+it was not optimized against, and every design is warm-started from the
+unconstrained optimum, since started cold from the polar-derived guess the
+constrained solves stall in a poorer basin and the comparison would be
+measuring the starting point.
+
+| design | time | widest | reliability | 95th pct | worst |
+| --- | --- | --- | --- | --- | --- |
+| deterministic | 160.29 s | 150.0 m | **53.5%** | +52.5 m | +119.8 m |
+| margin 25 m | 162.72 s | 125.0 m | 82.5% | +20.4 m | +77.6 m |
+| margin 50 m | 161.12 s | 100.0 m | 96.0% | -3.4 m | +49.4 m |
+| margin 75 m | 160.76 s | 75.0 m | 100.0% | -34.9 m | +18.2 m |
+| **P(inside) >= 95%** | **160.55 s** | 95.3 m | **98.6%** | -15.8 m | +32.2 m |
+
+The deterministic design satisfies its constraint and sits exactly on it, so
+an uncertain wind makes it a **coin flip**: it leaves the channel 46.5% of the
+time. That is not a flaw in the solve, it is what a constraint enforced at one
+set of parameter values means.
+
+The margin column is the conventional repair, and it shows the blindness the
+satellite paper is about. A designer picking 25 m of margin pays 2.4 s and
+buys 82.5%. Picking 75 m pays **less** time, 0.5 s, and buys 100%. Nothing
+available to them at the time of choosing says which they are getting.
+
+Putting the probability in the problem instead **dominates the margin
+outright**: at 160.55 s and 98.6%, it is both faster and more reliable than
+the 50 m margin at 161.12 s and 96.0%. Measured against the deterministic
+design, reaching 95% reliability by margin costs 0.83 s and reaching it by
+carrying the probability costs 0.26 s, so the margin was spending three times
+what the reliability was worth. Recovering 69% of it is close to the two
+thirds the satellite paper reports on an entirely different problem.
+
+Two caveats stated rather than buried. The margin column is **not monotone**,
+and it has to be, since a looser channel's feasible set contains a tighter
+one's: the 25 m entry at 162.72 s is a poor local optimum and the margin
+approach is being flattered nowhere and slandered there. And the probabilistic
+design overshoots its own target, reaching 98.6% where 95% was asked, so the
+comparison against the 50 m margin is the honest one to quote: strictly better
+on both axes at once.

@@ -182,26 +182,43 @@ def statistics_function(
     return statistics
 
 
-def statistics_discipline(
+def robust_discipline(
     scenario,
     uncertain: Sequence[str],
     sample,
     quantity: str,
-    design_names: Sequence[str] | None = None,
     reduction: Callable | None = None,
     factor: float = 2.0,
     smoothing: float = 1.0,
     target: float = 0.95,
-    name: str = "uncertainty",
+    name: str = "robust_scenario",
     prefix: str = CONSTANT_PREFIX,
 ):
-    """Wrap the statistics as a GEMSEO discipline over the design variables.
+    """Wrap the transcription and the statistics as **one** JAX discipline.
 
     This is what turns a probability into a constraint an ordinary
-    optimizer can be handed. Chained after the scenario's own discipline it
-    sees the same design variables, and being a JAX discipline like every
-    other one here its Jacobian is exact: the optimizer gets the derivative
-    of a probability, not a finite difference of a noisy estimate of one.
+    optimizer can be handed. Its Jacobian is exact, so the optimizer gets
+    the derivative of a probability rather than a finite difference of a
+    noisy estimate of one.
+
+    One discipline, not two, and that is not tidiness. Chaining a second
+    discipline alongside the scenario's own leaves the first one
+    undifferentiated: a JAX discipline filters its Jacobian down to the
+    inputs and outputs GEMSEO declares to it, those declarations do not
+    reach a discipline inside a chain, and an empty filter returns zeros
+    rather than raising. Measured on the sailing problem, the objective and
+    both terminal constraints came back with gradient exactly zero while
+    the added constraint alone had a gradient, and SLSQP stopped on its
+    first iteration reporting a singular LSQ matrix. Nothing anywhere said
+    the derivatives had gone. Computing both in the same jitted program
+    avoids the seam entirely, and these problems are one jitted program
+    each to begin with.
+
+    The cost is honest and unavoidable: every evaluation of the objective
+    now integrates the trajectory once per draw in the sample, so a
+    256-draw sample makes each iteration 257 integrations. That is what
+    designing against a probability costs, and vectorizing is what makes it
+    one dispatch rather than 257.
 
     Parameters
     ----------
@@ -213,9 +230,6 @@ def statistics_discipline(
         The fixed sample the statistics are taken over.
     quantity
         The constraint output, satisfied when not positive.
-    design_names
-        The inputs to expose; the scenario's design variables when
-        omitted.
     reduction
         How to reduce a path constraint to a scalar.
     factor
@@ -232,11 +246,12 @@ def statistics_discipline(
     Returns
     -------
     JAXDiscipline
-        The discipline, one output per statistic, each named
-        ``"<quantity>.<statistic>"``.
+        One discipline producing every transcription output and, in
+        addition, ``"<quantity>.<statistic>"`` for each statistic.
     """
     from gemseo_jax.jax_discipline import JAXDiscipline
 
+    problem = scenario.problem
     statistics = statistics_function(
         scenario,
         uncertain,
@@ -248,26 +263,28 @@ def statistics_discipline(
         target=target,
         prefix=prefix,
     )
-    defaults = scenario.problem.input_defaults
-    names = list(design_names or scenario.problem.design_variables)
+    design = list(problem.design_variables)
+    statistic_names = (MEAN, DEVIATION, MARGIN, RELIABILITY, SHORTFALL)
 
     def function(inputs: dict) -> dict:
-        """Return the statistics, named as the discipline declares them."""
-        values = statistics({key: inputs[key] for key in names})
-        return {
-            f"{quantity}.{statistic}": jnp.atleast_1d(value)
-            for statistic, value in values.items()
-        }
+        """Return the transcription outputs and the statistics together."""
+        outputs = dict(problem.jax_function(inputs))
+        values = statistics({key: inputs[key] for key in design})
+        for statistic in statistic_names:
+            outputs[f"{quantity}.{statistic}"] = jnp.atleast_1d(values[statistic])
+        return outputs
 
     return JAXDiscipline(
         function=function,
-        input_names=names,
+        input_names=list(problem.input_defaults),
         output_names=[
-            f"{quantity}.{statistic}"
-            for statistic in (MEAN, DEVIATION, MARGIN, RELIABILITY, SHORTFALL)
+            *problem.output_names,
+            *(f"{quantity}.{statistic}" for statistic in statistic_names),
         ],
-        default_inputs={key: defaults[key] for key in names},
-        differentiation_method=JAXDiscipline.DifferentiationMethod.REVERSE,
+        default_inputs=problem.input_defaults,
+        differentiation_method=JAXDiscipline.DifferentiationMethod(
+            scenario.differentiation_method
+        ),
         name=name,
     )
 
@@ -420,6 +437,6 @@ __all__ = [
     "Assessment",
     "assess",
     "format_assessments",
-    "statistics_discipline",
+    "robust_discipline",
     "statistics_function",
 ]

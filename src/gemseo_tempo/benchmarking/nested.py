@@ -59,6 +59,7 @@ import optimistix
 
 from gemseo_tempo.dynamics.controls import CubicControl
 from gemseo_tempo.dynamics.integrators import DiffraxIntegrator
+from gemseo_tempo.problems.albatross.model import ROUGHNESS
 from gemseo_tempo.problems.albatross.model import create_state_space
 from gemseo_tempo.problems.albatross.problem import Guess
 from gemseo_tempo.problems.albatross.problem import _design_values
@@ -118,6 +119,7 @@ def build_inner_problem(
     statics = create_statics()(values)
     theta = {
         "w_ref": w_ref,
+        "roughness": ROUGHNESS,
         "mass": float(statics["mass"]),
         "wing_area": values["wing_area"],
         "induced_factor": float(statics["induced_factor"]),

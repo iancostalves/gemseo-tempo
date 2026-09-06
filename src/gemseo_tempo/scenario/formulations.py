@@ -48,7 +48,7 @@ class BaseFormulationBuilder:
         scenario: DynamicScenario,
         maximize: bool = False,
         bounds: dict[str, tuple[float, float]] | None = None,
-        extra_disciplines: Sequence = (),
+        disciplines: Sequence | None = None,
         extra_constraints: Sequence[tuple[str, str]] = (),
     ) -> None:
         """Store the scenario.
@@ -62,20 +62,35 @@ class BaseFormulationBuilder:
         bounds
             Explicit ``(lower, upper)`` bounds per design-variable name,
             overriding the registry.
-        extra_disciplines
-            Disciplines to chain after the scenario's own, taking the same
-            design variables and producing further outputs. This is what
-            lets a trajectory be optimized against something the
-            transcription does not compute, a statistic over a sample of
+        disciplines
+            The disciplines to optimize, replacing the scenario's own.
+            They must between them produce the objective and every
+            constraint. This exists so a discipline can compute something
+            the transcription does not, a statistic over a sample of
             uncertain parameters being the case it was added for.
+
+            It replaces rather than extends, and that is the whole point.
+            Chaining a second discipline alongside the scenario's own
+            leaves the **first** one undifferentiated: a
+            :class:`~gemseo_jax.jax_discipline.JAXDiscipline` filters its
+            Jacobian down to the inputs and outputs GEMSEO declares to it,
+            those declarations do not reach a discipline in a chain, and
+            an empty filter returns zeros rather than an error. The
+            objective and every transcription constraint come back with
+            gradient exactly zero, the only surviving row is the added
+            one, and SLSQP stops on the first iteration with a singular
+            LSQ matrix. Nothing raises. So the way to add a quantity here
+            is to compute it in the *same* discipline, which
+            :func:`~gemseo_tempo.uncertainty.robust.robust_discipline`
+            does, and these problems are one jitted program each anyway.
         extra_constraints
-            ``(output name, constraint type)`` pairs from those
-            disciplines, wired in alongside the transcription's own.
+            ``(output name, constraint type)`` pairs to wire in alongside
+            the transcription's own.
         """
         self.scenario = scenario
         self.maximize = maximize
         self.bounds = dict(bounds or {})
-        self.extra_disciplines = list(extra_disciplines)
+        self.disciplines = list(disciplines) if disciplines is not None else None
         self.extra_constraints = list(extra_constraints)
 
     def _design_variable_names(self) -> list[str]:
@@ -164,6 +179,8 @@ class BaseFormulationBuilder:
         **formulation_settings
             The GEMSEO formulation settings; the formulation defaults to
             ``DisciplinaryOpt``, which chains the disciplines in order.
+            Note that chaining several JAX disciplines silently
+            un-differentiates all but the last; see ``disciplines``.
 
         Returns
         -------
@@ -172,7 +189,9 @@ class BaseFormulationBuilder:
         """
         formulation_settings.setdefault("formulation_name", "DisciplinaryOpt")
         problem = self.scenario.problem
-        disciplines = [*self.scenario.disciplines, *self.extra_disciplines]
+        disciplines = (
+            self.scenario.disciplines if self.disciplines is None else self.disciplines
+        )
         gemseo_scenario = create_scenario(
             disciplines,
             objective_name=problem.objective_name,

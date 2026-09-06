@@ -72,7 +72,7 @@ from gemseo_tempo.uncertainty.estimators import polynomial_chaos
 from gemseo_tempo.uncertainty.estimators import taylor
 from gemseo_tempo.uncertainty.robust import assess
 from gemseo_tempo.uncertainty.robust import format_assessments
-from gemseo_tempo.uncertainty.robust import statistics_discipline
+from gemseo_tempo.uncertainty.robust import robust_discipline
 from gemseo_tempo.uncertainty.sensitivity import format_indices
 from gemseo_tempo.uncertainty.sensitivity import screen
 from gemseo_tempo.uncertainty.sensitivity import sobol_indices
@@ -309,14 +309,17 @@ def run_margin(names) -> None:
     formulation = OptimalControl(
         scenario,
         bounds=_heading_bounds(scenario),
-        extra_disciplines=[
-            statistics_discipline(
+        # One discipline computing the trajectory and the statistics
+        # together; chaining a second one silently zeroes the first one's
+        # Jacobian. See robust_discipline for the measurements.
+        disciplines=[
+            robust_discipline(
                 scenario,
                 names,
                 design_sample,
                 CHANNEL,
                 reduction=jnp.max,
-                smoothing=5.0,
+                smoothing=8.0,
                 target=TARGET,
             )
         ],
