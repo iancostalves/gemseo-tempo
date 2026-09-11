@@ -126,12 +126,14 @@ def test_documented_extras_match_the_packaging():
         for line in pyproject.splitlines()
         if line.endswith("= [") and not line.startswith(" ")
     }
-    extras = declared & {"test", "doc", "calibration", "uq", "benchmark", "ipopt"}
+    extras = declared & {"test", "doc", "uq", "dev", "calibration", "benchmark"}
     page = (DOCS / "getting_started" / "installation.md").read_text(encoding="utf-8")
     for extra in extras:
         assert f"`{extra}`" in page, f"extra {extra!r} is undocumented"
-    # And nothing that was removed is still advertised.
-    for gone in {"benchmark", "ipopt"} - extras:
+    # And nothing that was removed is still advertised. Calibration was
+    # planned, dropped, and its extra taken out rather than left promising
+    # a capability nothing in the library provides.
+    for gone in {"benchmark", "calibration"} - extras:
         assert f"`{gone}`" not in page, f"extra {gone!r} no longer exists"
 
 

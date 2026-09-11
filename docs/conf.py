@@ -36,8 +36,27 @@ extensions = [
     "sphinx.ext.intersphinx",
     "sphinx.ext.viewcode",
     "sphinx_design",
+    "matplotlib.sphinxext.plot_directive",
+    "sphinxcontrib.bibtex",
     "tempo_myst",
 ]
+
+# Numbered [N] citations and a generated References page, matching the
+# convention of the companion NOADS documentation
+# (https://iancostalves.github.io/noads/).
+bibtex_bibfiles = ["references.bib"]
+bibtex_default_style = "unsrt"
+
+# Figures are drawn at build time from results stored under docs/_data, so
+# the code a reader sees is the code that made the picture. Note that the
+# directive has to be written inside an ``eval-rst`` block: it calls
+# ``insert_input`` on the state machine, which MyST's mock does not
+# implement, so the Markdown-native ``{plot}`` form fails to parse.
+plot_include_source = True
+plot_html_show_source_link = False
+plot_html_show_formats = False
+plot_formats = [("png", 140)]
+plot_rcparams = {"figure.autolayout": True, "savefig.bbox": "tight"}
 
 autosummary_generate = True
 autodoc_default_options = {"members": True, "undoc-members": False}

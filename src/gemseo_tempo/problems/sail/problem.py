@@ -386,7 +386,13 @@ def create_scenario(
             rtol=1e-8, atol=1e-8, n_save=size + 1, adjoint=SAIL_ADJOINT
         ),
         controls=(control,),
-        functionals=(Mayer("t_f", lambda t_final, states, theta: t_final),),
+        # Not ``t_f``: with a free final time that name is already a
+        # design variable, and GEMSEO keys its history dataset by name, so
+        # an objective sharing one with an input gives every column twice.
+        # Its post-processing then indexes a two-column array as if it were
+        # one and fails, which is how this was found. The albatross avoids
+        # the same collision by calling its objective ``w_ref_objective``.
+        functionals=(Mayer("arrival_time", lambda t_final, states, theta: t_final),),
         constraints=path_constraints,
         boundary=boundary,
         transcription=transcription,

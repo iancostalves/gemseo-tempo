@@ -38,7 +38,9 @@ def _group(records, level, size):
     return [r for r in records if r.level == level and r.size == size]
 
 
-def plot_study(records, study: str, path: Path, sizes=None):
+def plot_study(
+    records, study: str, path: Path, sizes=None, problem: str = "Brachistochrone"
+):
     """Draw the cost and success figure of one study.
 
     Parameters
@@ -51,6 +53,9 @@ def plot_study(records, study: str, path: Path, sizes=None):
         The destination image file.
     sizes
         The discretizations, in order; inferred when omitted.
+    problem
+        The problem name, used in the title; the brachistochrone when
+        omitted, since that is where this figure originated.
 
     Returns
     -------
@@ -86,7 +91,7 @@ def plot_study(records, study: str, path: Path, sizes=None):
             cost_axis.set_ylabel("Discipline calls (solved runs)")
             rate_axis.set_ylabel("Starting points solved [%]")
     figure.supxlabel("Discretization (segments, control intervals or save points)")
-    figure.suptitle(f"Brachistochrone: effect of the {study}")
+    figure.suptitle(f"{problem}: effect of the {study}")
     figure.tight_layout()
     path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(path, dpi=140)

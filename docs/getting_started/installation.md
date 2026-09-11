@@ -28,16 +28,24 @@ that. Pin a commit if you build on it.
 * - Available today
   - Still to come
 * - Direct single shooting, Hermite-Simpson collocation, indirect shooting
-  - The sail and albatross example problems
+  - Multiple phases, so a trajectory can change its dynamics part-way
 * - Monolithic and split assembly
-  - Calibration against observed trajectories
+  - Mesh refinement, rather than a discretization chosen by hand
 * - Statics, dynamics and outputs stages
-  - Sensitivity analysis and optimization under uncertainty
+  -
 * - Structure-aware Jacobians for collocation defects
-  - The documentation's variable grammar, generating tables from registries
-* - The brachistochrone in three variants, and the benchmark studies
+  -
+* - The brachistochrone, the sail and the albatross, with benchmark studies
+  -
+* - Sensitivity analysis and optimization under uncertainty
+  -
+* - The documentation's variable grammar, generating tables from registries
   -
 ```
+
+Calibration against observed trajectories was planned and dropped: nothing
+in the library reads measured data, and the extra that once promised it has
+been removed rather than left advertising a capability that does not exist.
 
 ## Installing from source
 
@@ -98,10 +106,10 @@ releases are tagged.
   - `pytest`, `coverage`, `covdefaults`, `pytest-xdist`.
 * - `doc`
   - Sphinx, `myst-parser`, `sphinx-design`, `furo`, `sphinx-autobuild`.
-* - `calibration`
-  - `gemseo-calibration`, for identifying model constants from data.
 * - `uq`
   - `gemseo-umdo` and `openturns`, for sensitivity and robust design.
+* - `dev`
+  - `nox`, which drives the checks below.
 ```
 
 Install several at once with `pip install -e ".[test,doc]"`.
@@ -118,3 +126,20 @@ extension import on some platforms, so the plugin form is avoided.
 `nox -s lint`, `nox -s docs` for a warnings-as-errors build, and
 `nox -s docs-serve` for a live-reloading preview on
 <http://127.0.0.1:8000>.
+
+It comes with the `dev` extra, or from `pipx install nox` if you would
+rather keep it out of the environment:
+
+```bash
+pip install -e ".[dev]"
+```
+
+Every session also runs directly, which is often what you want inside an
+environment that already has the dependencies:
+
+```bash
+sphinx-autobuild docs docs/_build/html --ignore docs/reference/generated
+sphinx-build -b html -W --keep-going docs docs/_build/html
+coverage run -m pytest && coverage report
+ruff check . && ruff format --check .
+```

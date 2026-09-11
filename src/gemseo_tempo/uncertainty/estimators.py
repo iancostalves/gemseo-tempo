@@ -136,6 +136,7 @@ def from_scenario(
     names: Sequence[str],
     quantity: str,
     differentiable: bool = True,
+    reductions=None,
 ) -> Propagation:
     """Build a propagation from a frozen dynamic scenario.
 
@@ -153,6 +154,10 @@ def from_scenario(
     differentiable
         Whether to attach the derivatives, which the Taylor and
         gradient-enhanced routes need.
+    reductions
+        How to reduce the quantity when it is not already scalar, by name;
+        a periodicity constraint reports one residual per state, and which
+        scalar stands for the whole is the caller's decision.
 
     Returns
     -------
@@ -160,8 +165,8 @@ def from_scenario(
         The propagation.
     """
     names = tuple(names)
-    evaluate = batch_evaluator(scenario, names, [quantity])
-    derivatives = batch_jacobian(scenario, names, [quantity])
+    evaluate = batch_evaluator(scenario, names, [quantity], reductions=reductions)
+    derivatives = batch_jacobian(scenario, names, [quantity], reductions=reductions)
 
     def values(sample):
         """Evaluate the quantity over a sample."""

@@ -163,6 +163,7 @@ def screen(
     quantity: str,
     n_trajectories: int = 20,
     levels: int = 8,
+    reductions=None,
 ) -> Screening:
     """Rank the uncertain variables by a Morris screening.
 
@@ -180,6 +181,8 @@ def screen(
         The number of one-at-a-time trajectories.
     levels
         The number of levels of the Morris grid.
+    reductions
+        How to reduce the quantity when it is not already scalar, by name.
 
     Returns
     -------
@@ -214,7 +217,7 @@ def screen(
             points.append(walk.copy())
     sample = numpy.asarray(points)
 
-    evaluate = batch_evaluator(scenario, names, [quantity])
+    evaluate = batch_evaluator(scenario, names, [quantity], reductions=reductions)
     values = numpy.asarray(evaluate(sample)).ravel()
 
     per_trajectory = dimension + 1
@@ -226,8 +229,16 @@ def screen(
         for position in range(dimension):
             moved = numpy.argmax(numpy.abs(block[position + 1] - block[position]) > 0.0)
             change = block[position + 1, moved] - block[position, moved]
+            # Divided by the step as a fraction of the variable's own
+            # range, not by the step in its own units. An elementary effect
+            # measured per metre and one measured per metre per second are
+            # not comparable numbers, and a screening exists to rank
+            # variables against each other: measured raw, a sea roughness
+            # varying over 0.06 m outranks a wind varying over 10 m/s by a
+            # factor of a hundred purely because its unit is smaller.
+            fraction = change / (upper[moved] - lower[moved])
             effects[moved].append(
-                (block_values[position + 1] - block_values[position]) / change
+                (block_values[position + 1] - block_values[position]) / fraction
             )
 
     return Screening(
@@ -247,6 +258,7 @@ def sobol_indices(
     quantity: str,
     n_samples: int = 512,
     seed: int = 0,
+    reductions=None,
 ) -> SobolResult:
     """Decompose the variance of a quantity, evaluating the design at once.
 
@@ -264,6 +276,8 @@ def sobol_indices(
         The base size; the design costs ``n_samples * (len(names) + 2)``.
     seed
         The sampling seed.
+    reductions
+        How to reduce the quantity when it is not already scalar, by name.
 
     Returns
     -------
@@ -275,7 +289,7 @@ def sobol_indices(
     experiment = openturns.SobolIndicesExperiment(distribution, n_samples)
     design = numpy.asarray(experiment.generate())
 
-    evaluate = batch_evaluator(scenario, names, [quantity])
+    evaluate = batch_evaluator(scenario, names, [quantity], reductions=reductions)
     evaluate(design).block_until_ready()
     started = time.perf_counter()
     values = numpy.asarray(evaluate(design).block_until_ready())

@@ -120,7 +120,13 @@ def main(argv=None) -> int:
             elapsed = time.perf_counter() - started
             stem = f"{suite.name}_{name}"
             save_records(records, output / f"{stem}.json")
-            figure = plot_study(records, stem, output / f"{stem}.png", sizes=sizes)
+            figure = plot_study(
+                records,
+                name,
+                output / f"{stem}.png",
+                sizes=sizes,
+                problem=suite.name.title(),
+            )
             solved = sum(record.status == CONVERGED for record in records)
             print(
                 f"{stem}: {len(records)} runs, {solved} solved,"

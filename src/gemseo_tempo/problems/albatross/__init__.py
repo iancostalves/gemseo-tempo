@@ -24,6 +24,7 @@ from gemseo_tempo.problems.albatross.model import wind_gradient
 from gemseo_tempo.problems.albatross.model import wind_speed
 from gemseo_tempo.problems.albatross.plots import energy_budget
 from gemseo_tempo.problems.albatross.plots import plot_controls
+from gemseo_tempo.problems.albatross.plots import plot_cycle_schematic
 from gemseo_tempo.problems.albatross.plots import plot_energy
 from gemseo_tempo.problems.albatross.plots import plot_energy_analysis
 from gemseo_tempo.problems.albatross.plots import plot_pareto
@@ -73,6 +74,7 @@ __all__ = [
     "gliding_baseline",
     "optimal_trajectory",
     "plot_controls",
+    "plot_cycle_schematic",
     "plot_energy",
     "plot_energy_analysis",
     "plot_pareto",

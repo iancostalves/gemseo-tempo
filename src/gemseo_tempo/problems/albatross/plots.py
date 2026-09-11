@@ -277,6 +277,77 @@ def energy_budget(trajectory) -> dict[str, float]:
     }
 
 
+def plot_cycle_schematic(axes=None):
+    """Draw the dynamic-soaring cycle: climb into the gradient, dive out of it.
+
+    Pure geometry, no data: a side-on S-shaped path through a wind profile
+    drawn as arrows growing with height, with the climb and dive legs
+    labelled. This is the picture behind :doc:`../../problems/albatross`'s
+    "why the equations are not just a glide": energy is extracted by
+    repeatedly crossing a wind gradient, not by any single manoeuvre.
+
+    Parameters
+    ----------
+    axes
+        The axis to draw on; a new one when omitted.
+
+    Returns
+    -------
+    Axes
+        The axis drawn on.
+    """
+    if axes is None:
+        _, axes = pyplot.subplots(figsize=(6.4, 4.4))
+
+    for height in numpy.linspace(0.5, 9.0, 9):
+        length = 0.15 + 0.10 * height
+        axes.annotate(
+            "",
+            xy=(length, height),
+            xytext=(0.0, height),
+            arrowprops={"arrowstyle": "-|>", "color": "tab:blue", "alpha": 0.5},
+        )
+    axes.text(4.5, 9.7, "wind speed, growing with height", color="tab:blue", fontsize=9)
+
+    path_t = numpy.linspace(0.0, 4.0 * numpy.pi, 400)
+    path_x = 1.2 * path_t
+    path_y = 4.5 + 3.8 * numpy.sin(path_t)
+    axes.plot(path_x, path_y, color="black", linewidth=1.8)
+
+    # Steepest-climb and steepest-dive points of the second cycle (cos is
+    # the slope of a sine path), where there is room to annotate without
+    # colliding with the wind arrows or the first cycle.
+    climb_t = 2.0 * numpy.pi
+    dive_t = 3.0 * numpy.pi
+    axes.text(
+        1.2 * climb_t,
+        4.5 + 0.9,
+        "climb\ninto the wind",
+        color="tab:green",
+        fontsize=9,
+        ha="center",
+    )
+    axes.text(
+        1.2 * dive_t,
+        4.5 - 1.3,
+        "dive\ndownwind",
+        color="tab:red",
+        fontsize=9,
+        ha="center",
+    )
+
+    axes.set_xlim(-0.5, path_x[-1] + 1.0)
+    axes.set_ylim(0.0, 11.0)
+    axes.set_xlabel("downwind distance")
+    axes.set_ylabel("height")
+    axes.set_title("One dynamic-soaring cycle")
+    axes.set_xticks([])
+    axes.set_yticks([])
+    for spine in axes.spines.values():
+        spine.set_visible(False)
+    return axes
+
+
 def plot_wind_profile(reference_winds=(6.0, 12.0, 20.0), axes=None):
     """Draw the wind profile and its gradient against height.
 

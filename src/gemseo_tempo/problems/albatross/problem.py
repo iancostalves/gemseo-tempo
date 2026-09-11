@@ -82,9 +82,8 @@ from gemseo_tempo.problems.albatross.statics import create_statics
 from gemseo_tempo.scenario.dynamic_scenario import DynamicScenario
 from gemseo_tempo.scenario.formulations import ControlAndDesign
 from gemseo_tempo.scenario.formulations import OptimalControl
+from gemseo_tempo.scenario.trajectories import optimal_trajectory
 from gemseo_tempo.transcriptions.base import CONSTANT_PREFIX
-from gemseo_tempo.transcriptions.base import TIMES
-from gemseo_tempo.transcriptions.base import TRAJECTORY_PREFIX
 from gemseo_tempo.transcriptions.base import BoundarySpec
 from gemseo_tempo.transcriptions.collocation import HermiteSimpson
 
@@ -598,60 +597,6 @@ def create_codesign_scenario(
         # the control knots live on the normalized one.
         scenario.problem.set_initial_guess(_trajectory(times, states, controls))
     return scenario
-
-
-def optimal_trajectory(scenario, gemseo_scenario):
-    """Recover the trajectory a solved scenario settled on.
-
-    The transcription publishes every state, control and output on the save
-    grid, so the cycle is read back from the discipline rather than
-    re-simulated, which would reintroduce the integration error the
-    transcription just worked to remove.
-
-    Parameters
-    ----------
-    scenario
-        The dynamic scenario that was optimized.
-    gemseo_scenario
-        The executed GEMSEO scenario.
-
-    Returns
-    -------
-    Trajectory
-        The states, controls and outputs on the save grid.
-    """
-    state_space = create_state_space()
-    discipline = scenario.disciplines[0]
-    optimum = gemseo_scenario.optimization_result.x_opt_as_dict
-    discipline.execute(
-        {
-            name: value
-            for name, value in optimum.items()
-            if name in discipline.input_grammar.names
-        }
-    )
-    data = discipline.io.data
-    states = {}
-    controls = {}
-    outputs = {}
-    for name in discipline.output_grammar.names:
-        if not name.startswith(TRAJECTORY_PREFIX):
-            continue
-        short = name[len(TRAJECTORY_PREFIX) :]
-        target = (
-            states
-            if short in state_space.states
-            else controls
-            if short in state_space.controls
-            else outputs
-        )
-        target[short] = jnp.asarray(data[name])
-    return Trajectory(
-        ts=jnp.asarray(data[TIMES]),
-        states=states,
-        controls=controls,
-        outputs=outputs,
-    )
 
 
 def _trajectory(times, states, controls):

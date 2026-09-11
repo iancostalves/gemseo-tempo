@@ -224,7 +224,13 @@ def create_scenario(
         integrator=integrator
         or DiffraxIntegrator(rtol=1e-9, atol=1e-9, n_save=size + 1),
         controls=controls,
-        functionals=(Mayer("t_f", lambda t_final, states, theta: t_final),),
+        # Not ``t_f``: with a free final time that name is already a
+        # design variable, and GEMSEO keys its history dataset by name, so
+        # an objective sharing one with an input gives every column twice.
+        # Its post-processing then indexes a two-column array as if it were
+        # one and fails, which is how this was found. The albatross avoids
+        # the same collision by calling its objective ``w_ref_objective``.
+        functionals=(Mayer("descent_time", lambda t_final, states, theta: t_final),),
         boundary=boundary,
         transcription=transcription,
         constants=constants,
@@ -284,9 +290,24 @@ def create_optimization(
         guess=guess,
         **kwargs,
     )
+    # Generous but finite box bounds on everything. Under collocation the
+    # states are design variables, and left unbounded they make a design
+    # space half of whose bounds are infinite: SLSQP does not mind, but
+    # every diagnostic that normalizes a design vector does, and GEMSEO's
+    # history views divide by a range that is then not a number. The
+    # limits below are five times the target and ten times the free-fall
+    # speed that reaches it, so they describe the problem without ever
+    # binding on it.
+    span = max(abs(TARGET[0]), abs(TARGET[1]))
+    reach = 5.0 * span
+    fastest = 10.0 * float(numpy.sqrt(2.0 * GRAVITY * span))
     bounds = {"t_f": (0.05, 10.0)}
     for name in scenario.problem.design_variables:
-        if name.startswith("control.") or name.startswith("state.gamma"):
+        if name.startswith(("control.", "state.gamma", "initial.gamma")):
             bounds[name] = (0.0, HALF_PI)
+        elif name.startswith(("state.v", "initial.v")):
+            bounds[name] = (0.0, fastest)
+        elif name.startswith(("state.", "initial.")):
+            bounds[name] = (-reach, reach)
     formulation = OptimalControl(scenario, bounds=bounds)
     return scenario, formulation.create_gemseo_scenario()

@@ -45,13 +45,21 @@ doc = [
     "myst-parser",
     "sphinx-design",
     "furo",
-]
-calibration = [
-    "gemseo-calibration",
+    # Arrives transitively through GEMSEO, but the documentation now draws
+    # its own figures with plot_directive, so it depends on it directly.
+    "matplotlib",
+    # Numbered [N] citations and a generated References page, the same
+    # convention as the companion NOADS documentation.
+    "sphinxcontrib-bibtex",
 ]
 uq = [
     "gemseo-umdo",
     "openturns",
+]
+dev = [
+    # The documentation and CONTRIBUTING both drive the checks with nox, so
+    # the project provides it rather than assuming it is on the path.
+    "nox",
 ]
 
 [project.urls]

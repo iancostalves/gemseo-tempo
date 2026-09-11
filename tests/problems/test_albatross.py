@@ -43,6 +43,7 @@ from gemseo_tempo.problems.albatross import energy_budget
 from gemseo_tempo.problems.albatross import gliding_baseline
 from gemseo_tempo.problems.albatross import optimal_trajectory
 from gemseo_tempo.problems.albatross import plot_controls
+from gemseo_tempo.problems.albatross import plot_cycle_schematic
 from gemseo_tempo.problems.albatross import plot_energy
 from gemseo_tempo.problems.albatross import plot_energy_analysis
 from gemseo_tempo.problems.albatross import plot_pareto
@@ -582,6 +583,7 @@ def test_the_model_figures_draw():
     assert len(plot_wind_profile()) == 2
     assert len(plot_polar()) == 2
     assert plot_section_trade() is not None
+    assert plot_cycle_schematic() is not None
 
 
 def test_the_model_figures_accept_existing_axes():
@@ -591,6 +593,17 @@ def test_the_model_figures_accept_existing_axes():
     assert plot_polar(axes=another) is another
     _, single = pyplot.subplots()
     assert plot_section_trade(single) is single
+    _, schematic_axes = pyplot.subplots()
+    assert plot_cycle_schematic(schematic_axes) is schematic_axes
+
+
+def test_the_cycle_schematic_labels_both_legs():
+    """Pure geometry: nothing to solve, so it draws the same every time."""
+    axes = plot_cycle_schematic()
+    texts = " ".join(text.get_text() for text in axes.texts)
+    assert "climb" in texts
+    assert "dive" in texts
+    assert len(axes.lines) >= 1
 
 
 # ------------------------------------------- aspect ratio reaches the lift

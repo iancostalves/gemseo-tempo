@@ -33,10 +33,15 @@ numbers quoted in the docs are checked against what the code computes.
 Implemented today: the three transcriptions (direct single shooting,
 Hermite-Simpson collocation, indirect shooting), the monolithic and split
 assemblies, the statics, dynamics and outputs stages, structure-aware
-Jacobians, the brachistochrone problem in three variants, and the
-one-factor-at-a-time benchmark studies. Still to come: the sail and albatross
-examples, calibration, uncertainty quantification, and the documentation's
-variable grammar.
+Jacobians, three problems (the brachistochrone in three variants, a sailing
+leg, and albatross dynamic soaring), one-factor-at-a-time benchmark studies,
+sensitivity analysis and optimization under uncertainty, and a variable
+grammar that generates the documentation's tables from the registries the
+code itself reads.
+
+Still to come: multiple phases, so a trajectory can change its dynamics
+part-way, and mesh refinement rather than a discretization chosen by hand.
+Calibration against observed trajectories was planned and dropped.
 
 ## Installation
 
@@ -60,7 +65,7 @@ simplest route; over HTTPS
 will supply them. Do not put a token in the URL — it ends up in shell history
 and in build logs.
 
-Python 3.11 to 3.13. Optional extras: `test`, `doc`, `calibration`, `uq`.
+Python 3.11 to 3.13. Optional extras: `test`, `doc`, `uq`, `dev`.
 
 Versions come from git tags via setuptools-scm. With no tags yet, an install
 reports something like `0.1.dev0+d20260705` — that is the expected fallback,
@@ -156,7 +161,16 @@ gemseo_scenario.execute(algo_name="SLSQP", max_iter=200)
 
 Build it locally with `nox -s docs-serve`, which serves a live-reloading
 preview on <http://127.0.0.1:8000>, or `nox -s docs` for a one-shot build
-that treats warnings as errors.
+that treats warnings as errors. `nox` comes with the `dev` extra.
+
+Inside an environment that already has the documentation dependencies, the
+same two builds run directly and rather faster, since nox otherwise makes a
+fresh environment for each:
+
+```bash
+sphinx-autobuild docs docs/_build/html --ignore docs/reference/generated
+sphinx-build -b html -W --keep-going docs docs/_build/html
+```
 
 ## License
 

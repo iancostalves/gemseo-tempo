@@ -21,7 +21,7 @@ such model. They run once per optimizer iteration, ahead of the dynamics, so
 sizing relations and derived coefficients are not recomputed at every time
 step. {class}`~gemseo_tempo.statics.chain.StaticsChain` finds them by a
 fixed-point sweep, which is independent of the order the models were declared
-in. See {doc}`../guides/statics`.
+in. See {doc}`../guides/scenario`.
 
 ## Dynamics
 
@@ -31,14 +31,14 @@ interface: {class}`~gemseo_tempo.dynamics.integrators.DiffraxIntegrator`
 integrates the ODE, and
 {class}`~gemseo_tempo.dynamics.integrators.QuasiStaticIntegrator` evaluates a
 purely algebraic model vmapped over the time grid, for simulation models that
-carry no integrated state. See {doc}`../guides/dynamics`.
+carry no integrated state. See {doc}`../guides/scenario`.
 
 ## Outputs
 
 Functionals turn a trajectory into scalars — terminal costs, running-cost
 integrals, rates at the final time — and constraints turn it into vectors:
 path constraints sampled along the trajectory, control-group sums, terminal
-conditions and periodicity. See {doc}`../guides/outputs`.
+conditions and periodicity. See {doc}`../guides/scenario`.
 
 ## Transcription
 

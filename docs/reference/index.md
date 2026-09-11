@@ -76,6 +76,7 @@ object is documented once, under the module that defines it.
    gemseo_tempo.scenario.dynamic_scenario
    gemseo_tempo.scenario.formulations
    gemseo_tempo.scenario.structured_discipline
+   gemseo_tempo.scenario.trajectories
 ```
 
 ## Problems
@@ -90,9 +91,11 @@ object is documented once, under the module that defines it.
    gemseo_tempo.problems.albatross.sequential
    gemseo_tempo.problems.albatross.statics
    gemseo_tempo.problems.brachistochrone.model
+   gemseo_tempo.problems.brachistochrone.plots
    gemseo_tempo.problems.brachistochrone.problem
    gemseo_tempo.problems.brachistochrone.reference
    gemseo_tempo.problems.sail.model
+   gemseo_tempo.problems.sail.plots
    gemseo_tempo.problems.sail.polar
    gemseo_tempo.problems.sail.problem
    gemseo_tempo.problems.sail.wind

@@ -37,7 +37,8 @@ pre-commit install
 
 ## Workflow
 
-- Lint and format: `ruff check .` and `ruff format .` (or `nox -s lint`).
+- Lint and format: `ruff check .` and `ruff format .` (or `nox -s lint`;
+  `nox` itself comes with the `dev` extra, `pip install -e ".[dev]"`).
 - Tests: `pytest` (or `nox -s tests`), targeting Python 3.11 to 3.13.
 - Docs: `nox -s docs` builds with `-W` (warnings are errors).
 - Docstrings are numpy-style.

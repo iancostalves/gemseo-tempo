@@ -85,10 +85,6 @@ concepts/differentiation
 :hidden:
 :caption: Guides
 
-guides/metadata
-guides/statics
-guides/dynamics
-guides/outputs
 guides/scenario
 guides/benchmarking
 guides/uncertainty
@@ -111,6 +107,7 @@ problems/sail
 
 reference/variables
 reference/index
+references
 ```
 
 ## License

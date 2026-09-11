@@ -62,6 +62,9 @@ class DynamicScenario:
     disciplines: list[JAXDiscipline]
     """The GEMSEO disciplines: 1 (monolithic) or up to 3 (split)."""
 
+    state_space: StateSpace
+    """The dynamics model, kept so a solved trajectory can be read back."""
+
     def __init__(
         self,
         state_space: StateSpace,
@@ -132,6 +135,7 @@ class DynamicScenario:
             raise ValueError(f"Unknown assembly {assembly!r}.")
         self.assembly = assembly
         self.registry = registry
+        self.state_space = state_space
         self.differentiation_method = differentiation_method
         self.transcription = (
             transcription if transcription is not None else SingleShooting()

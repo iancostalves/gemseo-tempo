@@ -328,6 +328,7 @@ def measure_speedup(
     quantities: Sequence[str],
     sample,
     prefix: str = CONSTANT_PREFIX,
+    reductions=None,
 ) -> Speedup:
     """Time both paths over the same sample and check they agree.
 
@@ -349,6 +350,8 @@ def measure_speedup(
         The ``(n, len(uncertain))`` sample.
     prefix
         The grammar prefix.
+    reductions
+        How to reduce any quantity that is not already scalar, by name.
 
     Returns
     -------
@@ -356,8 +359,8 @@ def measure_speedup(
         The two times, their ratio, and how far the results differ.
     """
     sample = numpy.asarray(sample, dtype=float)
-    batched = batch_evaluator(scenario, uncertain, quantities, prefix)
-    looped = looped_evaluator(scenario, uncertain, quantities, prefix)
+    batched = batch_evaluator(scenario, uncertain, quantities, prefix, reductions)
+    looped = looped_evaluator(scenario, uncertain, quantities, prefix, reductions)
 
     batched(sample).block_until_ready()
     looped(sample[:2])
