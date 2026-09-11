@@ -1,0 +1,46 @@
+{
+ "half_width": 150.0,
+ "target": 0.95,
+ "designs": [
+  {
+   "name": "deterministic",
+   "objective": 160.2420642050563,
+   "reliability": 0.5365,
+   "quantile": 53.044983858380704,
+   "worst": 120.50450554508507,
+   "across": 150.0000000158948
+  },
+  {
+   "name": "margin 25 m",
+   "objective": 162.75917902935163,
+   "reliability": 0.82425,
+   "quantile": 20.89572119294858,
+   "worst": 78.20047462942662,
+   "across": 125.00000001168348
+  },
+  {
+   "name": "margin 50 m",
+   "objective": 161.72388117171013,
+   "reliability": 0.96975,
+   "quantile": -8.185613683384991,
+   "worst": 42.68971673509148,
+   "across": 99.99999942676077
+  },
+  {
+   "name": "margin 75 m",
+   "objective": 160.71584900319652,
+   "reliability": 0.999,
+   "quantile": -35.16921309386243,
+   "worst": 6.659065871580964,
+   "across": 75.00000005759169
+  },
+  {
+   "name": "P(inside) >= 95%",
+   "objective": 160.71569643810415,
+   "reliability": 0.99875,
+   "quantile": -34.56304781092388,
+   "worst": 7.577215374498536,
+   "across": 75.55960510062495
+  }
+ ]
+}

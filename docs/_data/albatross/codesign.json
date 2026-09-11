@@ -1,0 +1,10 @@
+{
+ "minimum_wind": 8.63323057088331,
+ "feasible": true,
+ "budget": {
+  "air_change": 0.0,
+  "ground_change": 7.105427357601002e-15,
+  "drag_work": -13.973735200093948,
+  "gradient_work": 14.02982823174268
+ }
+}

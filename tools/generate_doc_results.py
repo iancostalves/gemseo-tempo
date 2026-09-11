@@ -54,6 +54,9 @@ logging.disable(logging.CRITICAL)
 DATA = Path(__file__).resolve().parents[1] / "docs" / "_data"
 """Where the stored results live."""
 
+BASELINES = Path(__file__).resolve().parents[1] / "benchmarks" / "baselines"
+"""Where the already-blessed benchmark baselines live, one file per suite."""
+
 PROBLEMS = ("brachistochrone", "sail", "albatross")
 """The problems, in the order the documentation introduces them."""
 
@@ -283,9 +286,27 @@ def generate_brachistochrone(smoke: bool = False) -> None:
         }
     _write_json("brachistochrone/variants.json", optima)
 
-    # The cycloid itself, sampled finely, as the answer to reproduce.
-    theta = numpy.linspace(0.0, numpy.pi, 200)
-    radius = 2.0 / (1.0 - numpy.cos(numpy.pi))
+    # The cycloid itself, sampled finely, as the answer to reproduce. theta_f
+    # solves the same transcendental aspect-ratio equation cycloid_time()
+    # does; it is not pi in general (only the target's aspect ratio would
+    # make it so), so it is solved for here rather than assumed, the way an
+    # earlier version of this generator did, which quietly stored a curve
+    # that reached (pi, 2) instead of the actual (2, 2) target.
+    import math
+
+    from scipy.optimize import brentq
+
+    from gemseo_tempo.problems.brachistochrone.model import TARGET
+
+    x_target, y_target = TARGET
+    ratio = x_target / y_target
+    theta_final = brentq(
+        lambda theta: (theta - math.sin(theta)) / (1.0 - math.cos(theta)) - ratio,
+        1e-6,
+        2.0 * math.pi - 1e-6,
+    )
+    radius = y_target / (1.0 - math.cos(theta_final))
+    theta = numpy.linspace(0.0, theta_final, 200)
     _write_arrays(
         "brachistochrone/cycloid.npz",
         x=radius * (theta - numpy.sin(theta)),
@@ -497,6 +518,42 @@ def _write_benchmark_study(
     )
 
 
+def _write_baseline_study(problem: str, study: str) -> None:
+    """Render a study's figure from an already-blessed baseline.
+
+    Sail and albatross already carry a committed
+    ``benchmarks/baselines/<problem>.json``, re-blessed by hand when the
+    model changes; re-running the study here would cost the same
+    optimizations twice for no different an answer. So this loads the
+    baseline's records for the given study and only draws the figure,
+    the way :func:`_write_benchmark_study` does for a freshly run one.
+
+    Parameters
+    ----------
+    problem
+        The suite name.
+    study
+        The study name to pull out of the baseline, e.g.
+        ``"transcription"``.
+    """
+    from gemseo_tempo.benchmarking.plots import plot_study
+    from gemseo_tempo.benchmarking.runner import Record
+
+    baseline = json.loads((BASELINES / f"{problem}.json").read_text(encoding="utf-8"))
+    records = [Record(**entry) for entry in baseline if entry["study"] == study]
+    if not records:
+        msg = f"benchmarks/baselines/{problem}.json has no {study!r} records."
+        raise ValueError(msg)
+    image_path = DATA / problem / f"{study}_study.png"
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+    sizes = sorted({record.size for record in records})
+    plot_study(records, study, image_path, sizes=sizes, problem=problem.title())
+    print(f"  {problem}/{study}_study.png")
+    _write_json(
+        f"{problem}/{study}_study.json", [record.as_dict() for record in records]
+    )
+
+
 # ------------------------------------------------------------------- sail
 
 
@@ -602,6 +659,7 @@ def generate_sail(smoke: bool = False) -> None:
         },
     )
 
+    _write_baseline_study("sail", "transcription")
     _generate_sail_uncertainty(size, smoke)
 
 
@@ -972,6 +1030,7 @@ def generate_albatross(smoke: bool = False) -> None:
         sweep.append({"w_ref": wind, **budget_of})
     _write_json("albatross/energy_sweep.json", sweep)
 
+    _write_baseline_study("albatross", "optimizer")
     _generate_albatross_uncertainty(size, smoke, DiffraxIntegrator, SingleShooting)
 
 

@@ -1,0 +1,7 @@
+{
+ "n_samples": 512,
+ "looped_seconds": 22.580749300017487,
+ "batched_seconds": 0.45944339997367933,
+ "speedup": 49.14805458367907,
+ "max_difference": 3.637978807091713e-12
+}

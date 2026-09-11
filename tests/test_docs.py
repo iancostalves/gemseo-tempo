@@ -23,6 +23,7 @@ the code computes, fails the suite.
 from __future__ import annotations
 
 import pkgutil
+import re
 from pathlib import Path
 
 import pytest
@@ -165,6 +166,30 @@ def test_problem_pages_generate_their_variable_tables(page):
     text = (DOCS / page).read_text(encoding="utf-8")
     assert "```{variable-context}" in text, f"{page} declares no model"
     assert "```{variables}" in text, f"{page} generates no variable table"
+
+
+@pytest.mark.parametrize(
+    "page", ["problems/albatross.md", "problems/brachistochrone.md", "problems/sail.md"]
+)
+def test_problem_pages_reference_benchmark_pngs_that_exist(page):
+    """A pre-rendered benchmark figure that is not on disk breaks the build.
+
+    ``plot_study`` renders these once, outside the documentation build (see
+    :mod:`tempo_docdata`), and the page embeds the PNG with a plain
+    ``{image}`` directive rather than a ``{plot}`` block. Sphinx only warns
+    about a missing one, and ``-W`` catches that; this test says so without
+    a full build, and names which page and file are missing.
+    """
+    text = (DOCS / page).read_text(encoding="utf-8")
+    for match in re.finditer(r"```\{image\}\s+(\S+)", text):
+        target = match.group(1)
+        if "_data/" not in target:
+            continue
+        path = (DOCS / page).parent / target
+        assert path.resolve().exists(), (
+            f"{page} embeds {target}, which does not exist; "
+            "regenerate with `python tools/generate_doc_results.py`"
+        )
 
 
 def test_every_variable_the_pages_mention_is_declared():

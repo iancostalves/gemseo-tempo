@@ -65,7 +65,19 @@ simplest route; over HTTPS
 will supply them. Do not put a token in the URL — it ends up in shell history
 and in build logs.
 
-Python 3.11 to 3.13. Optional extras: `test`, `doc`, `uq`, `dev`.
+Python 3.11 to 3.13.
+
+### Extras
+
+| extra | brings in | for |
+| --- | --- | --- |
+| `test` | `pytest`, `pytest-xdist`, `coverage`, `covdefaults` | running the test suite. Use `coverage run -m pytest`, not `pytest --cov`: pytest-cov's in-process coverage startup breaks jaxlib's MLIR extension import. |
+| `doc` | `sphinx`, `sphinx-autobuild`, `myst-parser`, `sphinx-design`, `furo`, `matplotlib`, `sphinxcontrib-bibtex` | building the documentation: Markdown pages, figures drawn at build time, and the numbered `[N]` citations on the [references page](docs/references.md). |
+| `uq` | `gemseo-umdo`, `openturns` | the uncertainty quantification and optimization-under-uncertainty machinery (`gemseo_tempo.uncertainty`): parameter spaces, Sobol/Morris sensitivity, polynomial chaos, robust design. |
+| `dev` | `nox` | driving the checks (lint, tests, docs) the same way CI and `CONTRIBUTING.md` do, without assuming `nox` is already on the path. |
+
+Combine extras as needed, e.g. `pip install -e ".[test,doc,uq]"` for
+everything except the nox-driven workflow.
 
 Versions come from git tags via setuptools-scm. With no tags yet, an install
 reports something like `0.1.dev0+d20260705` — that is the expected fallback,
@@ -161,7 +173,8 @@ gemseo_scenario.execute(algo_name="SLSQP", max_iter=200)
 
 Build it locally with `nox -s docs-serve`, which serves a live-reloading
 preview on <http://127.0.0.1:8000>, or `nox -s docs` for a one-shot build
-that treats warnings as errors. `nox` comes with the `dev` extra.
+that treats warnings as errors. `nox` comes with the `dev` extra; the build
+itself needs the `doc` extra.
 
 Inside an environment that already has the documentation dependencies, the
 same two builds run directly and rather faster, since nox otherwise makes a
@@ -171,6 +184,27 @@ fresh environment for each:
 sphinx-autobuild docs docs/_build/html --ignore docs/reference/generated
 sphinx-build -b html -W --keep-going docs docs/_build/html
 ```
+
+`sphinx-autobuild` opens a browser tab on its own; the one-shot
+`sphinx-build` does not serve anything, so open `docs/_build/html/index.html`
+in a browser afterwards to view it.
+
+Every figure on a problem page is drawn at build time from code the reader
+could run themselves — except one kind: anything that needs an optimizer
+(a converged trajectory, a benchmark sweep) is solved once, ahead of time,
+by `tools/generate_doc_results.py`, and stored under `docs/_data/`, which
+is committed so an ordinary build never re-solves anything. Regenerate it
+after a change that would move those numbers:
+
+```bash
+python tools/generate_doc_results.py            # everything, ~1 h
+python tools/generate_doc_results.py --only sail  # one problem
+python tools/generate_doc_results.py --smoke     # tiny, for the test suite
+```
+
+`tests/test_doc_data.py` guards against the stored numbers drifting away
+from what the code would now produce, without re-running the optimizations
+themselves on every test run.
 
 ## License
 

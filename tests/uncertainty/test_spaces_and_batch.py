@@ -35,6 +35,7 @@ from gemseo_tempo.uncertainty import make_parameter_space
 from gemseo_tempo.uncertainty import measure_speedup
 from gemseo_tempo.uncertainty import nominal_values
 from gemseo_tempo.uncertainty import uncertain_names
+from gemseo_tempo.uncertainty.estimators import from_scenario
 
 logging.disable(logging.CRITICAL)
 
@@ -194,3 +195,36 @@ def test_freezing_uses_the_optimum_rather_than_the_guess(frozen):
     # And it genuinely responds: a frozen design under varying physics does
     # not give the same answer twice.
     assert values[:, 0].std() > 1e-4
+
+
+def test_from_scenario_wraps_a_frozen_scenario_as_a_propagation(frozen):
+    """The estimators' own entry point, built on top of the batch helpers.
+
+    Every estimator in :mod:`gemseo_tempo.uncertainty.estimators` takes a
+    :class:`~gemseo_tempo.uncertainty.estimators.Propagation`, and
+    :func:`~gemseo_tempo.uncertainty.estimators.from_scenario` is how one
+    is built from a frozen scenario rather than an analytic function, the
+    way every estimator comparison in the documentation does it.
+    """
+    scenario, names, sample = frozen
+    quantity = QUANTITIES[0]
+    propagation = from_scenario(scenario, REGISTRY, names, quantity)
+
+    values = propagation.evaluate(sample[:16])
+    assert values.shape == (16,)
+    expected = numpy.asarray(batch_evaluator(scenario, names, [quantity])(sample[:16]))
+    assert values == pytest.approx(expected.ravel())
+
+    gradients = propagation.jacobian(sample[:16])
+    assert gradients.shape == (16, len(names))
+    expected_jacobian = numpy.asarray(
+        batch_jacobian(scenario, names, [quantity])(sample[:16])
+    )[:, 0, :]
+    assert gradients == pytest.approx(expected_jacobian)
+
+    # Some estimators (plain sampling) never touch the derivative, and
+    # asking for it should cost nothing rather than fail.
+    not_differentiable = from_scenario(
+        scenario, REGISTRY, names, quantity, differentiable=False
+    )
+    assert not_differentiable.jacobian is None

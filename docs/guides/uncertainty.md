@@ -127,48 +127,13 @@ it is known to three decimal places, and a screening ought to be able to say so.
 
 ## Six ways to the same number
 
-`gemseo_tempo.uncertainty.estimators` estimates the mean and standard deviation
-of one quantity several ways and scores them against a large sample. On the sail
-downwind leg, with the along-track arrival error as the quantity and the wind
-strength and veer as the uncertainties, against 50 000 samples taking 49 s:
-
-| estimator | model calls | seconds | mean error | std error |
-| --- | --- | --- | --- | --- |
-| sampling, vmapped | 512 | 0.53 | +0.9% | -2.1% |
-| sampling, looped | 512 | 22.57 | +0.9% | -2.1% |
-| Taylor, first order | 2 | 0.29 | +2.0% | +1.0% |
-| Taylor, second order | 6 | | -3.6% | +1.5% |
-| chaos, 32 points | 32 | 0.07 | +0.5% | -0.3% |
-| chaos + gradients, 32 | 64 | 0.68 | +0.6% | -0.3% |
-| chaos, 12 points | 12 | 0.06 | -2.5% | +0.1% |
-| chaos + gradients, 12 | 24 | 0.43 | -1.5% | -0.4% |
-
-Errors are relative to the reference **spread**, the mean included. A converged
-design misses its target by little on average, so the reference mean is near
-zero, and dividing an error by it turns a small absolute error into an enormous
-relative one that says nothing about the estimator.
-
-What the table says:
-
-- The two sampling rows are one estimator on identical points, differing only in
-  dispatch. The 43x between them is the whole claim of the batch evaluator,
-  measured on a real analysis rather than a synthetic loop.
-- **First-order Taylor gets the spread to 1.0% for two model calls**, beating
-  512 samples. This is the CSMA paper's remark holding exactly: the cost is
-  about twice a deterministic evaluation when the derivatives are exact, and
-  here they are, by construction.
-- Second order is *worse* than first on the mean here. The curvature correction
-  overshoots. It is reported rather than dressed up.
-- Chaos on 12 points costs 0.06 s and gets the spread to 0.1%. Gradient
-  enhancement earns its keep where points are scarce, halving the error of the
-  mean at 12 points, and adds nothing at 32.
-
-A warning drawn from getting this wrong first. With a subtly incorrect Jacobian,
-first-order Taylor came out 17% wrong on the spread, and that looked exactly like
-the expected failure of a first-order method on a nonlinear response. It was not.
-See {doc}`../problems/sail` for the adjoint fault behind it. An estimator that
-depends on derivatives is only as good as the derivatives, and a plausible-looking
-failure is the most expensive kind.
+`gemseo_tempo.uncertainty.estimators` estimates the mean and standard
+deviation of one quantity several ways and scores them against a large
+sample: sampling (vmapped and looped), first- and second-order Taylor, and
+polynomial chaos with and without gradient enhancement. See the UQ
+strategies comparison on {doc}`../problems/sail` for what that comparison
+looks like on a real analysis, and the warning that follows it about what
+an estimator that depends on derivatives depends on.
 
 ## Designing against a probability
 
@@ -221,47 +186,14 @@ deliberate:
   logistic in the constraint value stands in for it. The width is a modelling
   choice, reported rather than buried: too wide and the constraint is not the
   one you asked for, too narrow and the gradient vanishes again. At the width
-  used below it agrees with the counted fraction to about a point.
+  used on {doc}`../problems/sail`'s margin design it agrees with the counted
+  fraction to about a point.
 
 ## What a safety margin costs
 
-The argument, on the sail downwind leg with a 150 m channel the boat has to
-stay inside, under an uncertain wind. Every design is measured on 4000 draws
-it was not optimized against, and every design is warm-started from the
-unconstrained optimum, since started cold from the polar-derived guess the
-constrained solves stall in a poorer basin and the comparison would be
-measuring the starting point.
-
-| design | time | widest | reliability | 95th pct | worst |
-| --- | --- | --- | --- | --- | --- |
-| deterministic | 160.29 s | 150.0 m | **53.5%** | +52.5 m | +119.8 m |
-| margin 25 m | 162.72 s | 125.0 m | 82.5% | +20.4 m | +77.6 m |
-| margin 50 m | 161.12 s | 100.0 m | 96.0% | -3.4 m | +49.4 m |
-| margin 75 m | 160.76 s | 75.0 m | 100.0% | -34.9 m | +18.2 m |
-| **P(inside) >= 95%** | **160.55 s** | 95.3 m | **98.6%** | -15.8 m | +32.2 m |
-
-The deterministic design satisfies its constraint and sits exactly on it, so
-an uncertain wind makes it a **coin flip**: it leaves the channel 46.5% of the
-time. That is not a flaw in the solve, it is what a constraint enforced at one
-set of parameter values means.
-
-The margin column is the conventional repair, and it shows the blindness the
-satellite paper is about. A designer picking 25 m of margin pays 2.4 s and
-buys 82.5%. Picking 75 m pays **less** time, 0.5 s, and buys 100%. Nothing
-available to them at the time of choosing says which they are getting.
-
-Putting the probability in the problem instead **dominates the margin
-outright**: at 160.55 s and 98.6%, it is both faster and more reliable than
-the 50 m margin at 161.12 s and 96.0%. Measured against the deterministic
-design, reaching 95% reliability by margin costs 0.83 s and reaching it by
-carrying the probability costs 0.26 s, so the margin was spending three times
-what the reliability was worth. Recovering 69% of it is close to the two
-thirds the satellite paper reports on an entirely different problem.
-
-Two caveats stated rather than buried. The margin column is **not monotone**,
-and it has to be, since a looser channel's feasible set contains a tighter
-one's: the 25 m entry at 162.72 s is a poor local optimum and the margin
-approach is being flattered nowhere and slandered there. And the probabilistic
-design overshoots its own target, reaching 98.6% where 95% was asked, so the
-comparison against the 50 m margin is the honest one to quote: strictly better
-on both axes at once.
+The argument: a deterministic design that satisfies a constraint at one set
+of parameter values can be a coin flip under an uncertain one, a margin is
+the conventional repair and it is not monotone in what it buys, and putting
+the probability directly in the problem can dominate the margin outright,
+both faster and more reliable at once. See the main result on
+{doc}`../problems/sail` for the numbers this plays out with.

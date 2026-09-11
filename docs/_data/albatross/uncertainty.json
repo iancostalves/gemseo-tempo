@@ -1,0 +1,118 @@
+{
+ "objective": -101.6976577177,
+ "feasible": true,
+ "size": 10,
+ "speedup": {
+  "n_samples": 256,
+  "looped_seconds": 5.814762299996801,
+  "batched_seconds": 0.7087444000062533,
+  "speedup": 8.204314982870407,
+  "max_difference": 1.0314238352293614e-10
+ },
+ "screening": {
+  "ranking": [
+   "w_ref",
+   "roughness"
+  ],
+  "mean_effect": [
+   248.98587070238432,
+   133.31890245617413
+  ],
+  "n_evaluations": 60
+ },
+ "sobol": {
+  "names": [
+   "w_ref",
+   "roughness"
+  ],
+  "first_order": [
+   0.7518885936632389,
+   0.12738350965051318
+  ],
+  "total": [
+   0.8396384604432453,
+   0.489246389797624
+  ],
+  "n_evaluations": 2048,
+  "seconds": 5.244780000008177
+ },
+ "reference": {
+  "name": "reference",
+  "mean": 138.09785449691478,
+  "standard_deviation": 70.81183387070176,
+  "n_evaluations": 4096,
+  "n_gradients": 0,
+  "cost": 4096,
+  "seconds": 10.11673750000773,
+  "mean_error": 0.0,
+  "deviation_error": 0.0
+ },
+ "estimates": [
+  {
+   "name": "sampling, vmapped",
+   "mean": 133.471197122375,
+   "standard_deviation": 75.70196219398723,
+   "n_evaluations": 128,
+   "n_gradients": 0,
+   "cost": 128,
+   "seconds": 0.3651975000393577,
+   "mean_error": -0.0653373471867397,
+   "deviation_error": 0.06905806637086329
+  },
+  {
+   "name": "sampling, looped",
+   "mean": 133.47119712237503,
+   "standard_deviation": 75.70196219398761,
+   "n_evaluations": 128,
+   "n_gradients": 0,
+   "cost": 128,
+   "seconds": 2.819097100000363,
+   "mean_error": -0.06533734718673931,
+   "deviation_error": 0.0690580663708687
+  },
+  {
+   "name": "taylor 1",
+   "mean": 101.69765771769866,
+   "standard_deviation": 6.950270562900928,
+   "n_evaluations": 1,
+   "n_gradients": 1,
+   "cost": 2,
+   "seconds": 0.28898229997139424,
+   "mean_error": -0.5140411537099961,
+   "deviation_error": -0.9018487421806967
+  },
+  {
+   "name": "taylor 2",
+   "mean": 106.25930625340294,
+   "standard_deviation": 10.04702049378417,
+   "n_evaluations": 1,
+   "n_gradients": 5,
+   "cost": 6,
+   "seconds": 0.6545278999838047,
+   "mean_error": -0.4496218570140007,
+   "deviation_error": -0.8581166459813844
+  },
+  {
+   "name": "pce",
+   "mean": 155.8944122007913,
+   "standard_deviation": 437.19767016481114,
+   "n_evaluations": 32,
+   "n_gradients": 0,
+   "cost": 32,
+   "seconds": 0.1246775999898091,
+   "mean_error": 0.25132180217747196,
+   "deviation_error": 5.1740763692564204
+  },
+  {
+   "name": "pce + grad",
+   "mean": 123.92034786983628,
+   "standard_deviation": 125.48606636931451,
+   "n_evaluations": 32,
+   "n_gradients": 32,
+   "cost": 64,
+   "seconds": 0.9026539999758825,
+   "mean_error": -0.20021380399448194,
+   "deviation_error": 0.7721058686101067
+  }
+ ]
+}

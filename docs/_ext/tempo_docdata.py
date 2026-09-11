@@ -26,6 +26,19 @@ a direct function evaluation, a polar curve or a wind profile, is computed
 live, because it costs milliseconds and cannot go stale.
 
 A figure that takes noticeable time to draw is a figure breaking that rule.
+
+One more rule, learned the hard way: a page with more than one ``.. plot::``
+directive must not write each one's code inline in its own ``{eval-rst}``
+fence. MyST parses each fence through a fresh nested document, and
+``plot_directive`` names an inline block's output file from a counter it
+stores as a document attribute — so every fence's first (and only) block
+resets to the same counter value and silently overwrites the previous
+figure with the next one, with no warning from the build. The fix used
+throughout this documentation is ``docs/_ext/gallery/``: one small script
+per figure, referenced as ``.. plot:: _ext/gallery/<name>.py`` (a path,
+resolved relative to ``docs/``, regardless of which page it is used from),
+which names its own output file from the script path instead of the
+counter and is immune to this.
 """
 
 from __future__ import annotations

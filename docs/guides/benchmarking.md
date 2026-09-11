@@ -71,30 +71,16 @@ runs enter the cost panel.
 complementary view: the fraction of starting points solved within a given
 budget of calls.
 
-## Some results
-
-A first sweep of the optimizer study reproduces the expected picture:
-
-```{list-table}
-:header-rows: 1
-:widths: 40 60
-
-* - Level
-  - Starting points solved within 200 calls
-* - SLSQP
-  - 67%
-* - NLOPT_SLSQP
-  - 58%
-* - COBYLA (gradient-free)
-  - 8%
-```
-
 :::{note}
-The optimizer study compares only constrained solvers. This problem carries
-terminal equalities, and with collocation also defect equalities; L-BFGS-B,
-TNC and Nelder-Mead reject it outright rather than solve it badly, so
-including them would compare failures rather than methods.
+The optimizer study compares only constrained solvers. Every suite here
+carries at least one equality (terminal, or collocation's own defects);
+L-BFGS-B, TNC and Nelder-Mead reject that outright rather than solve it
+badly, so including them would compare failures rather than methods.
 :::
+
+Each problem's own optimizer, transcription and AD benchmarks are on its
+page, next to the result they benchmark: {doc}`../problems/brachistochrone`,
+{doc}`../problems/sail`, {doc}`../problems/albatross`.
 
 ## Three problems, not one
 
@@ -136,33 +122,23 @@ the threshold sits in the gap and separates gybing from not gybing.
 
 ## What compiling costs, and when it pays
 
-Sprint 9 found the disciplines were never JIT-compiled and reported the fix as
-a single speedup number. That conflates two costs which scale differently:
-compilation grows with the program, the saving is per evaluation. So three
-times are measured, and from them the **crossover**, the evaluations needed
-before compiling has repaid itself:
+Sprint 9 found the disciplines were never JIT-compiled and reported the fix
+as a single speedup number. That conflates two costs which scale
+differently: compilation grows with the program, the saving is per
+evaluation. So three times are measured on each problem, and from them the
+**crossover**, the evaluations needed before compiling has repaid itself —
+see the Optimization section of each problem's own page for its numbers.
+The answer is the same everywhere measured so far: compiling pays within
+single-digit evaluations, against the dozens or hundreds any optimization
+makes.
 
-| suite | size | variables | compile | compiled | eager | speedup | crossover |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| brachistochrone | 3 | 12 | 0.09 s | 0.6 ms | 11.3 ms | 19x | 8 |
-| brachistochrone | 10 | 40 | 0.09 s | 0.5 ms | 10.8 ms | 20x | 9 |
-| brachistochrone | 30 | 120 | 0.09 s | 0.6 ms | 10.4 ms | 17x | 9 |
-| brachistochrone | 100 | 400 | 0.09 s | 0.6 ms | 11.0 ms | 18x | 8 |
-| sail | 25 | 75 | 1.39 s | 0.7 ms | 460.8 ms | 628x | 3 |
-| albatross | 8 | 71 | 0.27 s | 0.9 ms | 55.0 ms | 58x | 5 |
-| albatross | 16 | 135 | 0.27 s | 1.1 ms | 55.6 ms | 52x | 5 |
-
-The answer is that **compiling always pays here**: three to nine evaluations,
-against the dozens or hundreds any optimization makes. It was worth measuring
-rather than assuming, since the crossover is a property of the problem and a
-cheap enough one would never repay a second of compilation.
-
-Two cautions on reading that table. The times are for a single discipline
-evaluation, not for a whole optimization, which also spends time in gradients
-and in GEMSEO itself; Sprint 9's end-to-end figures were smaller for that
-reason. And the measurement perturbs its inputs on every call, because a
-GEMSEO discipline caches on its inputs and timing the same call twice measures
-a dictionary lookup. Both are easy mistakes and both were made first.
+Two cautions on reading those numbers, wherever they are quoted. They are
+for a single discipline evaluation, not for a whole optimization, which
+also spends time in gradients and in GEMSEO itself; Sprint 9's end-to-end
+figures were smaller for that reason. And the measurement perturbs its
+inputs on every call, because a GEMSEO discipline caches on its inputs and
+timing the same call twice measures a dictionary lookup. Both are easy
+mistakes and both were made first.
 
 ## Baselines, and catching a regression
 
@@ -187,42 +163,6 @@ at the wrong directory says so.
 remembered. They are smaller than a full sweep on purpose: a regression shows
 up in a handful of starting points as readily as in twenty-five, and a
 baseline that takes ninety minutes to refresh never gets refreshed.
-
-## Closing the cycle with an inner solve
-
-The albatross guess satisfies every equation of motion except the one for
-speed, and speed is also the state whose periodicity is hardest to close. That
-suggests a nested formulation: solve for the initial speed **inside** each
-evaluation, so the outer problem loses a design variable and an equality.
-
-The mechanism works. The residual `r(V0) = V(t_f; V0) - V0` is solved by
-Newton, and the derivative comes from the implicit function theorem rather
-than from differentiating through the iterations, which keeps the gradient
-exact and its cost independent of how many steps were taken. Against a central
-difference the two agree to five significant figures.
-
-What stops it being usable as it stands is physical rather than numerical:
-
-| start | lowest height | physical | converged |
-| --- | --- | --- | --- |
-| 28 m/s | −14.9 m | no | no |
-| 32 m/s | −12.0 m | no | no |
-| 34 m/s | −6.8 m | no | yes |
-| 36 m/s | +2.0 m | yes | yes |
-| 40 m/s | +8.3 m | yes | yes |
-
-Below about 35 m/s the prescribed cycle flies the bird under the water. The
-wind profile's smooth floor keeps the arithmetic finite, so what comes back is
-a number computed from a trajectory that does not exist, and the integration
-underneath the root finder fails outright rather than returning a poor value.
-Inside an optimizer that is a discipline which did not evaluate.
-
-So the inner solve is conditionally robust, and the condition is now measured
-rather than discovered: `robustness_map` reports where a start can be taken
-from. A formulation built on this must bracket the root or start from the
-inverse-dynamics speed, which is already in the right region. That formulation
-is the remaining step, and it is not attempted here on the strength of a solve
-that fails outside a region this narrow.
 
 ## Why not gemseo-benchmark
 

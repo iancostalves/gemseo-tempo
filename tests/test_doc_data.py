@@ -204,11 +204,29 @@ def test_the_margin_study_reaches_a_probabilistic_design():
 
 
 def test_the_albatross_cycle_closes():
-    """A soaring cycle that does not return to its start is not a cycle."""
+    """A soaring cycle that does not return to its start is not a cycle.
+
+    Not ``V``: the stored cycle is the ``energy`` mission's, which closes
+    on height and attitude only and leaves speed open on purpose so any
+    surplus is banked as airspeed (see the mission table in
+    docs/problems/albatross.md) — asserting it here would fail on a
+    correctly-optimized cycle, not a broken one.
+
+    And ``psi`` closes only modulo a full turn: a loop comes back to the
+    same direction of flight having gained ``2*pi``, which is exactly why
+    ``PeriodicityConstraint`` takes an ``offsets`` mapping rather than
+    demanding plain equality (see "Three things that had to be got right"
+    on the same page).
+    """
     cycle = _load("albatross/cycle_energy.npz")
-    for name in ("h", "V", "gamma", "psi"):
+    for name in ("h", "gamma"):
         first, last = float(cycle[name][0]), float(cycle[name][-1])
         assert last == pytest.approx(first, abs=1e-2), f"{name} does not close"
+    first, last = float(cycle["psi"][0]), float(cycle["psi"][-1])
+    residual = (last - first) % (2.0 * numpy.pi)
+    assert min(residual, 2.0 * numpy.pi - residual) == pytest.approx(0.0, abs=1e-2), (
+        "psi does not close, even modulo a full turn"
+    )
 
 
 def test_the_energy_sweep_crosses_break_even():

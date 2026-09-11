@@ -1,0 +1,27 @@
+{
+ "unconstrained": {
+  "time": 158.80572794469578,
+  "across": null
+ },
+ "widths": [
+  {
+   "half_width": 250.0,
+   "time": 158.80572725640337,
+   "across": 189.42378820348108,
+   "start": "free"
+  },
+  {
+   "half_width": 150.0,
+   "time": 160.2420662389924,
+   "across": 150.00002047518637,
+   "start": "chained"
+  },
+  {
+   "half_width": 80.0,
+   "time": 161.41394908832984,
+   "across": 79.16687431728187,
+   "start": "chained"
+  }
+ ],
+ "collocation": 161.70761717174813
+}
