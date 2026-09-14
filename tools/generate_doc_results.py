@@ -647,9 +647,45 @@ def generate_sail(smoke: bool = False) -> None:
             raise RuntimeError(msg)
         previous = best.pop("solution")
         trajectory = best.pop("trajectory")
+        best["design"] = previous
+        best["trajectory"] = trajectory
         channel.append(best)
-        if width == drawn:
-            _write_arrays("sail/track_channel.npz", **_trajectory_arrays(trajectory))
+
+    # A second pass, from the tight end back out. A tighter channel's
+    # optimum is feasible for every looser one, so it can only improve a
+    # looser answer, and starting each width from the next-tighter design
+    # is what turns "the solver found a basin" into "the study is
+    # monotone". Without it the 150 m entry landed 2 s *behind* the 80 m
+    # one on this polar, which is a statement about starting points rather
+    # than about channels.
+    for index in range(len(channel) - 2, -1, -1):
+        record = channel[index]
+        inner, inner_gemseo = create_optimization(
+            transcription=SingleShooting(),
+            size=size,
+            integrator=integrator(size),
+            channel_half_width=record["half_width"],
+        )
+        objective, solution, met, outputs = _solve_checked(
+            inner, inner_gemseo, budget, warm=channel[index + 1]["design"]
+        )
+        if met and objective < record["time"]:
+            record.update(
+                time=objective,
+                across=float(
+                    numpy.max(numpy.abs(numpy.asarray(outputs["trajectory.y"])))
+                ),
+                start="from the tighter channel",
+                design=solution,
+                trajectory=optimal_trajectory(inner, inner_gemseo),
+            )
+
+    for record in channel:
+        if record["half_width"] == drawn:
+            _write_arrays(
+                "sail/track_channel.npz", **_trajectory_arrays(record["trajectory"])
+            )
+        del record["design"], record["trajectory"]
     _write_json(
         "sail/channel.json",
         {

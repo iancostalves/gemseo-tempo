@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import logging
 
+from gemseo_tempo.dynamics.integrators import DiffraxIntegrator
 from gemseo_tempo.problems.brachistochrone import GRAVITY
 from gemseo_tempo.problems.brachistochrone import TARGET
 from gemseo_tempo.problems.brachistochrone import create_optimization
@@ -43,9 +44,23 @@ FINE_SIZE = 200
 
 
 def solve(variant: str, transcription, size: int) -> float:
-    """Solve one variant and return the descent time."""
+    """Solve one variant and return the descent time.
+
+    Shooting integrates with a **fixed** step here, which matters only
+    since the friction law started reading the control's turning rate. The
+    rate of a piecewise-linear control is piecewise constant, so at two
+    hundred nodes the right-hand side has two hundred jumps in it, and an
+    adaptive controller spends the solve chasing them: left adaptive, the
+    two transcriptions disagreed by 43% at this discretization while
+    agreeing to 0.02% at twenty. A fixed step crosses the jumps the same
+    way every time, which is the same lesson the albatross's Jacobian
+    checks learned.
+    """
     _, gemseo_scenario = create_optimization(
-        transcription=transcription, variant=variant, size=size
+        transcription=transcription,
+        variant=variant,
+        size=size,
+        integrator=DiffraxIntegrator(dt0=1.0 / (20 * size), n_save=size + 1),
     )
     gemseo_scenario.execute(algo_name="SLSQP", max_iter=400)
     return float(gemseo_scenario.optimization_result.f_opt)

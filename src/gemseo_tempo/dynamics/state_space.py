@@ -50,6 +50,21 @@ class StateSpace:
     outputs: tuple[str, ...]
     """The instantaneous-output names."""
 
+    control_rates: tuple[str, ...]
+    """The controls whose time-derivative the model needs.
+
+    Empty for almost every model: a right-hand side normally reads the
+    control's *value* and nothing else. A few physical laws need its rate
+    as well — the normal force on a bead constrained to a wire carries a
+    centripetal term in the turning rate of the path angle, which is the
+    control — and for those the rate arrives in ``u`` under
+    ``"<name>_rate"``, so that :meth:`rhs` keeps its signature and no model
+    that does not ask for a rate is affected.
+    """
+
+    RATE_SUFFIX = "_rate"
+    """How a control's time-derivative is named in the control dictionary."""
+
     def __init__(
         self,
         states: Sequence[str],
@@ -58,6 +73,7 @@ class StateSpace:
         outputs: Sequence[str] = (),
         rhs: Callable | None = None,
         output: Callable | None = None,
+        control_rates: Sequence[str] = (),
     ) -> None:
         """Declare the variables and optionally the model functions.
 
@@ -78,13 +94,45 @@ class StateSpace:
         output
             The instantaneous outputs ``(t, s, u, theta) -> dict``;
             alternatively override :meth:`output` in a subclass.
+        control_rates
+            The controls whose time-derivative ``rhs`` reads, delivered in
+            ``u`` as ``"<name>_rate"``; see :attr:`control_rates`.
+
+        Raises
+        ------
+        ValueError
+            If a control rate is asked for a name that is not a control.
         """
         self.states = tuple(states)
         self.controls = tuple(controls)
         self.parameters = tuple(parameters)
         self.outputs = tuple(outputs)
+        self.control_rates = tuple(control_rates)
         self._rhs = rhs
         self._output = output
+        unknown = sorted(set(self.control_rates) - set(self.controls))
+        if unknown:
+            msg = (
+                f"Cannot take the time-derivative of {unknown}, which"
+                f" {'is' if len(unknown) == 1 else 'are'} not among the"
+                f" controls {list(self.controls)}."
+            )
+            raise ValueError(msg)
+
+    def rate_name(self, name: str) -> str:
+        """Return the key a control's time-derivative arrives under.
+
+        Parameters
+        ----------
+        name
+            The control name.
+
+        Returns
+        -------
+        str
+            The key in the control dictionary passed to :meth:`rhs`.
+        """
+        return f"{name}{self.RATE_SUFFIX}"
 
     def rhs(self, t, s: dict, u: dict, theta: dict) -> dict:
         """Compute the state rates.

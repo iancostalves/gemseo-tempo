@@ -571,6 +571,15 @@ class IndirectShooting(AbstractTranscription):
                 " terminal conditions are declared through"
                 " BoundarySpec.fix_final / s1 instead."
             )
+        if state_space.control_rates:
+            raise ValueError(
+                "Indirect shooting cannot solve a model that reads a"
+                f" control's time-derivative ({sorted(state_space.control_rates)}):"
+                " the control then enters the Hamiltonian through its own"
+                " rate, so stationarity is no longer a pointwise condition"
+                " on u and the closed-form optimal control does not apply."
+                " Use single shooting or collocation for such a model."
+            )
         for functional in functionals:
             if isinstance(functional, FinalRate):
                 raise ValueError(

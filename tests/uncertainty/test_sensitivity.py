@@ -58,15 +58,21 @@ def frozen():
 def test_screening_ranks_the_uncertainties_cheaply(frozen):
     """Morris finds the ordering for a fraction of a Sobol budget.
 
-    Drag dominates, friction follows, and gravity does almost nothing,
-    which is the point of including a variable known to three decimal
-    places: a screening should be able to say so.
+    Friction dominates, drag follows a long way back, and gravity does
+    almost nothing — which is the point of including a variable known to
+    three decimal places: a screening should be able to say so.
+
+    The order changed when the constants stopped being invented. Drag used
+    to lead, on a coefficient sampled over 0.03 to 0.07 with nothing behind
+    those numbers; deriving it from a cylinder's own drag coefficient,
+    uncertain over 1.0 to 1.3, gives a far *narrower* spread, while
+    friction gained the centripetal part of the normal force. Both moved
+    for physical reasons, in opposite directions, and the ranking followed.
     """
     scenario, names = frozen
     result = screen(scenario, REGISTRY, names, QUANTITY, n_trajectories=20)
     assert result.n_evaluations == 20 * (len(names) + 1)
-    assert result.ranking[0] == "k_over_m"
-    assert result.ranking[-1] == "g"
+    assert result.ranking == ["mu", "drag_coefficient", "g"]
     largest = max(result.mean_effect)
     gravity = result.mean_effect[result.names.index("g")]
     assert gravity < 0.4 * largest
@@ -79,8 +85,9 @@ def test_the_screening_predicts_the_variance_decomposition(frozen):
     range, so scaling it by that variable's spread relative to the range
     gives what it contributes to the spread of the answer, and squaring
     turns that into a share of variance. Against Sobol on the same frozen
-    design this gives 0.028, 0.333 and 0.639 where the decomposition gives
-    0.025, 0.333 and 0.637.
+    design the two agree on the ordering and on the dominance of friction,
+    which is what a screening is asked for; the tolerance below is what the
+    agreement is actually worth rather than what would flatter it.
 
     The correspondence is what makes screening first worth doing, and it
     did not hold until the effects were normalized: measured in each
@@ -104,17 +111,22 @@ def test_the_screening_predicts_the_variance_decomposition(frozen):
     shares = numpy.asarray(shares) / sum(shares)
 
     total = numpy.asarray(indices.total) / sum(indices.total)
-    assert shares == pytest.approx(total, abs=0.02)
+    # The ranking is what transfers; the shares agree to a few points.
+    assert list(numpy.argsort(shares)) == list(numpy.argsort(total))
+    assert shares == pytest.approx(total, abs=0.08)
 
 
 def test_screening_names_what_is_not_worth_measuring(frozen):
     scenario, names = frozen
     result = screen(scenario, REGISTRY, names, QUANTITY, n_trajectories=12)
-    # Gravity's effect is about a quarter of drag's once the effects are
-    # normalized, and a twentieth of it in variance; the threshold is on
-    # the effect, so it sits between those two figures.
-    assert "g" in result.negligible(threshold=0.4)
-    assert "k_over_m" not in result.negligible(threshold=0.4)
+    # Friction carries this problem: against it both of the others come out
+    # at about a fifth, so a threshold of 0.4 calls them both negligible and
+    # only friction is worth a Sobol budget. Gravity is in the list on
+    # purpose, as the variable that *should* be dismissed.
+    negligible = result.negligible(threshold=0.4)
+    assert "g" in negligible
+    assert "mu" not in negligible
+    assert result.ranking[0] == "mu"
 
 
 def test_a_screening_that_finds_nothing_calls_everything_negligible():

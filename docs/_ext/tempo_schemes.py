@@ -89,32 +89,86 @@ def _block(axes, xy, width, height, text, *, fill="#e8eef7", edge="#333333"):
     return box
 
 
-def _arrow(axes, start, end, label="", *, color="#666666"):
-    """Draw a curved arrow with a small label near its midpoint."""
+def _elbow(axes, start, end, label="", *, color="#666666", label_offset=(0.0, 0.03)):
+    """Draw one N2 elbow arrow: straight out, square turn, straight in.
+
+    The square turn is the whole point. An N2 chart is read as a matrix, so
+    data leaves a block sideways along its row and enters the next one
+    vertically down its column; a curved arrow drawn corner to corner says
+    nothing about which row and column it travelled.
+
+    Parameters
+    ----------
+    axes
+        The axis to draw on.
+    start
+        Where the arrow leaves, on the source block's east or west face.
+    end
+        Where the arrow arrives, on the target block's north or south face.
+    label
+        The data carried, drawn at the corner.
+    color
+        The arrow colour.
+    label_offset
+        Where to put the label relative to the corner.
+    """
+    corner = (end[0], start[1])
+    axes.plot(
+        [start[0], corner[0]],
+        [start[1], corner[1]],
+        color=color,
+        linewidth=1.0,
+        solid_capstyle="butt",
+    )
     arrow = FancyArrowPatch(
-        start,
+        corner,
         end,
-        connectionstyle="arc3,rad=0.15",
         arrowstyle="-|>",
         mutation_scale=10,
         color=color,
         linewidth=1.0,
+        shrinkA=0.0,
+        shrinkB=0.0,
     )
     axes.add_patch(arrow)
     if label:
-        midpoint = ((start[0] + end[0]) / 2, (start[1] + end[1]) / 2)
         axes.text(
-            midpoint[0],
-            midpoint[1] + 0.03,
+            corner[0] + label_offset[0],
+            corner[1] + label_offset[1],
             label,
             fontsize=7.5,
             color=color,
-            ha="center",
+            ha="left" if label_offset[0] >= 0.0 else "right",
+            va="bottom" if label_offset[1] >= 0.0 else "top",
         )
 
 
-def _dataflow_panel(axes, title, boxes_and_arrows):
-    """Draw one Opt/Traj/Obj dataflow diagram.
+# The three blocks sit on a descending diagonal, so that every arrow runs
+# along one block's row and down another's column, which is what makes the
+# picture an N2 chart rather than three boxes and some arrows.
+_BOX = (0.27, 0.17)
+"""The width and height of an N2 block."""
+
+_OPT = (0.02, 0.72)
+_TRAJ = (0.36, 0.40)
+_OBJ = (0.70, 0.08)
+"""The lower-left corners of the optimizer, trajectory and objective blocks."""
+
+
+def _centre(corner):
+    """Return the centre of a block from its lower-left corner."""
+    return (corner[0] + _BOX[0] / 2, corner[1] + _BOX[1] / 2)
+
+
+def _n2_panel(axes, title, middle_label, forward_label, defect_label=""):
+    """Draw one Opt/Traj/Obj N2 diagram.
+
+    Reproduces the layout of the ISDC paper's transcription figure: the
+    three components on the diagonal, the forward path along the rows, and
+    the feedback the optimizer receives coming back along them. What
+    distinguishes the transcriptions is exactly what the off-diagonal
+    cells carry, so the one structural difference between the panels is
+    the extra ``Traj -> Opt`` arrow a defect-carrying method needs.
 
     Parameters
     ----------
@@ -122,48 +176,66 @@ def _dataflow_panel(axes, title, boxes_and_arrows):
         The axis to draw on.
     title
         The panel title.
-    boxes_and_arrows
-        A callable drawing the boxes and arrows onto ``axes``.
+    middle_label
+        The label of the middle block.
+    forward_label
+        What the optimizer hands the middle block.
+    defect_label
+        What the middle block hands straight back to the optimizer; empty
+        for single shooting, which has no defects to report.
     """
     axes.set_xlim(0, 1)
     axes.set_ylim(0, 1)
     axes.set_aspect("equal")
     axes.axis("off")
-    axes.set_title(title, fontsize=10, fontweight="bold")
-    boxes_and_arrows(axes)
+    axes.set_title(title, fontsize=9.5, fontweight="bold")
 
+    _block(axes, _OPT, *_BOX, "Opt", fill="#dde8fb", edge=VARIABLE)
+    _block(axes, _TRAJ, *_BOX, middle_label, fill="#ededed", edge=COMPUTED)
+    _block(axes, _OBJ, *_BOX, "Obj", fill="#fbe1e1", edge=CONSTRAINED)
 
-def _triangle_dataflow(axes, middle_label, forward_label, feedback_label):
-    """Draw the shared Opt/middle/Objective triangle layout.
+    opt, traj, obj = _centre(_OPT), _centre(_TRAJ), _centre(_OBJ)
+    east = _BOX[0] / 2
+    half = _BOX[1] / 2
 
-    Parameters
-    ----------
-    axes
-        The axis to draw on.
-    middle_label
-        The label of the middle box (the trajectory or the defects).
-    forward_label
-        The arrow label from the optimizer to the middle box.
-    feedback_label
-        The arrow label from the middle box to the objective.
-    """
-    _block(axes, (0.03, 0.66), 0.32, 0.24, "Optimizer", fill="#dde8fb")
-    _block(axes, (0.62, 0.66), 0.35, 0.24, middle_label)
-    _block(axes, (0.30, 0.06), 0.35, 0.24, "Objective", fill="#fbe1e1")
-    # Optimizer -> middle, along the top.
-    _arrow(axes, (0.35, 0.80), (0.62, 0.80), forward_label)
-    # middle -> objective, down the right side.
-    _arrow(axes, (0.75, 0.66), (0.58, 0.30), feedback_label)
-    # objective -> optimizer, back along the left side, closing the loop.
-    _arrow(axes, (0.32, 0.18), (0.12, 0.66), "f_obj")
-
-
-def _shooting_dataflow(axes):
-    _triangle_dataflow(axes, "Trajectory\n(integrator)", "u(t_c)", "s(t), u(t)")
-
-
-def _collocation_dataflow(axes):
-    _triangle_dataflow(axes, "Defects\n(algebraic)", "s(t_c), u(t_c)", "zeta_c")
+    # Forward: out of a block's east face, down into the next block's north.
+    _elbow(
+        axes,
+        (opt[0] + east, opt[1]),
+        (traj[0], traj[1] + half),
+        forward_label,
+        color=VARIABLE,
+        label_offset=(0.02, 0.02),
+    )
+    _elbow(
+        axes,
+        (traj[0] + east, traj[1]),
+        (obj[0], obj[1] + half),
+        "s(t)",
+        color=COMPUTED,
+        label_offset=(0.02, 0.02),
+    )
+    # Feedback: out of a west face, back up into the optimizer's south.
+    _elbow(
+        axes,
+        (obj[0] - east, obj[1]),
+        (opt[0] + 0.05, opt[1] - half),
+        "f_obj",
+        color=CONSTRAINED,
+        label_offset=(0.02, -0.02),
+    )
+    if defect_label:
+        # The defects go straight back to the optimizer as constraints,
+        # never through the objective: that extra cell is the whole
+        # difference between shooting and a defect-based transcription.
+        _elbow(
+            axes,
+            (traj[0] - east, traj[1]),
+            (opt[0] - 0.05, opt[1] - half),
+            defect_label,
+            color=CONSTRAINED,
+            label_offset=(-0.02, 0.02),
+        )
 
 
 def _control_panel(axes, title, node_style):
@@ -185,13 +257,41 @@ def _control_panel(axes, title, node_style):
 
 
 def _state_panel(axes, title, style):
-    """Draw a state-trajectory panel: smooth (shooting) or node-held (collocation)."""
+    """Draw a state-trajectory panel, per transcription.
+
+    Parameters
+    ----------
+    axes
+        The axis to draw on.
+    title
+        The panel title.
+    style
+        ``"shooting"`` for one variable at the start and a computed value
+        at the end, ``"multiple"`` for one variable per segment start with
+        the continuity constraints between them, ``"collocation"`` for
+        every node a variable with defects at the collocation points.
+    """
     times = numpy.linspace(0.0, 4.0, 200)
     state = 0.4 + 0.55 * times - 0.28 * times**2 + 0.055 * times**3
     axes.plot(times, state, color="#222222", linewidth=1.3)
     node_times = numpy.array([0.0, 1.3, 2.6, 3.9])
     node_values = 0.4 + 0.55 * node_times - 0.28 * node_times**2 + 0.055 * node_times**3
-    if style == "collocation":
+    if style == "multiple":
+        # One decision variable at each segment start, and a continuity
+        # constraint where the integrated segment has to meet the next. At
+        # an interior junction the same point is both, so the ring is drawn
+        # unfilled and larger, around the variable rather than over it.
+        axes.scatter(node_times[:-1], node_values[:-1], color=VARIABLE, zorder=5, s=28)
+        axes.scatter(
+            node_times[1:],
+            node_values[1:],
+            facecolor="none",
+            edgecolor=CONSTRAINED,
+            zorder=6,
+            s=80,
+            linewidth=1.2,
+        )
+    elif style == "collocation":
         axes.scatter(node_times, node_values, color=VARIABLE, zorder=5, s=28)
         collocation_times = numpy.array([0.65, 2.0, 3.25])
         collocation_values = (
@@ -224,22 +324,29 @@ def _state_panel(axes, title, style):
 def plot_transcription_scheme(axes=None):
     """Draw the transcription comparison: discretization, then dataflow.
 
-    Two columns, single shooting and collocation. The top row shows how
-    the control is held (every node a design variable for both, since
-    both parameterize the control at nodes); the middle row shows how the
+    Three columns, in the order they grow: single shooting, multiple
+    shooting, collocation. The top row shows how the control is held
+    (every node a design variable for all three, since all three
+    parameterize the control at nodes); the middle row shows how the
     *state* is held — a single variable at the start and a computed value
-    at the end for shooting, every node a variable tied down by defects at
-    the collocation points for collocation; the bottom row is the dataflow
-    between the optimizer, the trajectory or defects, and the objective.
-    Filled blue points are decision variables the optimizer holds
-    directly; open red points are constraint locations; the plain black
-    point is a value obtained by integration rather than held.
+    at the end for single shooting, one per segment for multiple shooting,
+    every node a variable tied down by defects at the collocation points
+    for collocation; the bottom row is the N2 diagram of what the
+    optimizer, the trajectory and the objective pass each other. Filled
+    blue points are decision variables the optimizer holds directly; open
+    red points are constraint locations; the plain black point is a value
+    obtained by integration rather than held.
+
+    Multiple shooting is drawn because it is the step between the other
+    two and reading them without it hides why collocation looks the way it
+    does; this library does not implement it, for the reasons in
+    :doc:`../concepts/transcriptions`.
 
     Parameters
     ----------
     axes
-        Unused; this figure always makes its own 2x3 grid, since a single
-        axis cannot hold six independent panels. Present for interface
+        Unused; this figure always makes its own 3x3 grid, since a single
+        axis cannot hold nine independent panels. Present for interface
         consistency with the rest of the project's plot functions.
 
     Returns
@@ -248,14 +355,28 @@ def plot_transcription_scheme(axes=None):
         The figure.
     """
     del axes
-    figure, grid = pyplot.subplots(3, 2, figsize=(7.2, 8.0))
+    figure, grid = pyplot.subplots(3, 3, figsize=(10.2, 8.4))
 
-    _control_panel(grid[0][0], "Single shooting — control", "variable")
-    _control_panel(grid[0][1], "Collocation — control", "variable")
-    _state_panel(grid[1][0], "Single shooting — state", "shooting")
-    _state_panel(grid[1][1], "Collocation — state", "collocation")
-    _dataflow_panel(grid[2][0], "Single shooting — dataflow", _shooting_dataflow)
-    _dataflow_panel(grid[2][1], "Collocation — dataflow", _collocation_dataflow)
+    columns = (
+        ("Single shooting", "shooting", "Traj", "u(t_c)", ""),
+        ("Multiple shooting", "multiple", "Traj", "u(t_c), s_2", "delta_2"),
+        ("Collocation", "collocation", "Traj", "u(t_c), s(t_c)", "zeta_c"),
+    )
+    for column, (name, style, middle, forward, defect) in enumerate(columns):
+        _control_panel(grid[0][column], f"{name} — control", "variable")
+        _state_panel(grid[1][column], f"{name} — state", style)
+        _n2_panel(grid[2][column], f"{name} — dataflow", middle, forward, defect)
+        if style == "multiple":
+            grid[2][column].text(
+                0.5,
+                -0.04,
+                "not implemented in this library",
+                transform=grid[2][column].transAxes,
+                ha="center",
+                fontsize=8,
+                style="italic",
+                color="#666666",
+            )
 
     handles = [
         pyplot.Line2D(

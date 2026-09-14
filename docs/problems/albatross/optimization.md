@@ -1,236 +1,9 @@
-# Albatross dynamic soaring
+# Optimization
 
 ```{variable-context} gemseo_tempo.problems.albatross.model:REGISTRY
 ```
 
-An albatross crosses oceans for days without flapping and without thermals. It
-does it by repeatedly climbing into the wind and diving back downwind through
-air that moves faster higher up. Each pass through the gradient takes a little
-energy out of the wind, and over a closed cycle that can be exactly enough to
-pay for the drag.
-
-This is the flagship problem of the library. It is the only one that uses a
-**statics chain**, a **path constraint**, **periodicity** and a **co-design
-formulation** at once.
-
-```python
-from gemseo_tempo.problems.albatross import create_codesign_optimization
-
-scenario, gemseo_scenario = create_codesign_optimization(size=20)
-gemseo_scenario.execute(algo_name="SLSQP", max_iter=500)
-print(gemseo_scenario.optimization_result.f_opt)  # about 8.6 m/s
-```
-
-## Physics
-
-### Kinematics
-
-```{eval-rst}
-.. plot:: _ext/gallery/albatross_kinematics.py
-   :include-source: false
-```
-
-Six states place and orient a point mass, and two controls fly it. Both
-tables are generated from the registry the model itself reads, so they
-cannot drift from the code:
-
-```{variables} gemseo_tempo.problems.albatross.model:REGISTRY
-:filter: tags=state
-:columns: name, full_name, unit, bounds
-```
-
-```{variables} gemseo_tempo.problems.albatross.model:REGISTRY
-:filter: tags=control
-:columns: name, full_name, unit, bounds
-```
-
-Note what the bound on {var}`cl <symbol>` is not: a number written in this
-page or in the dynamics. It is the stall limit the statics chain computes
-for the wing being designed, which is what stops a design buying glide
-ratio without paying for the manoeuvre.
-
-### Dynamics
-
-```text
-dx/dt = V cos(gamma) cos(psi) + W(h)
-dy/dt = V cos(gamma) sin(psi)
-dh/dt = V sin(gamma)
-```
-
-The equations are written for the velocity relative to the **air**, while
-Newton's law applies to the velocity relative to the **ground**. The two
-differ by the wind, so changing height means moving into air travelling at a
-different speed, and that enters as an acceleration:
-
-```text
-Wdot = (dW/dh) V sin(gamma)
-
-dV/dt     = -D/m - g sin(gamma) - Wdot cos(gamma) cos(psi)
-dgamma/dt = (L cos(mu) - m g cos(gamma)) / (m V) + Wdot sin(gamma) cos(psi) / V
-dpsi/dt   = L sin(mu) / (m V cos(gamma)) + Wdot sin(psi) / (V cos(gamma))
-```
-
-Those three `Wdot` terms are the entire mechanism. Set the gradient to zero
-and they vanish, leaving the textbook gliding equations, which can only lose.
-
-**Where the energy comes from.** Differentiating the air-relative specific
-energy `e = h + V^2/(2g)` along the equations leaves exactly two terms:
-
-```text
-de/dt = -D V / (m g)  -  (dW/dh) V^2 sin(gamma) cos(gamma) cos(psi) / g
-```
-
-Drag is always a loss. The gradient term's sign is the bird's to choose: with
-the wind increasing upwards it is positive whenever `sin(gamma) cos(psi)` is
-negative, which is to say **climb into the wind, descend with it**. The
-manoeuvre falls out of the equations rather than being imposed. That identity
-is asserted directly in the tests, on a finely integrated trajectory, because
-a sign error in the wind terms produces a model that appears to extract
-energy while the gain fails to match the work that made it.
-
-`plot_energy_analysis` draws the cycle in both frames, which is the figure
-worth reading. The **air-relative** energy is what the aerodynamics see: drag
-acts on airspeed and the drag polar knows nothing about the ground. The
-**inertial** energy, using ground speed, is what an observer on the water
-sees. The gap between them is the wind the bird is being carried along with,
-and it opens and closes as the bird climbs and dives. The inertial energy
-swings several times harder than the air-relative one over a cycle, since
-turning through the wind changes speed over the water far more than speed
-through the air. The third panel is the audit: drag and gradient work
-plotted against the measured rate, which must lie on top of their sum.
-
-### The wing
-
-The wing comes from a five-model statics chain rather than a table of
-constants, so the design variables reach the equations of motion through
-quantities that mean something:
-
-| model | in | out |
-| --- | --- | --- |
-| `AirfoilSection` | section | zero-lift drag `C_D0`, `C_L,max` |
-| `WingGeometry` | area, span, Oswald efficiency | aspect ratio, induced factor `k` |
-| `FiniteWing` | plan, aspect ratio, section properties | chord, Reynolds, `C_D0`, `C_L,max` |
-| `StructuralMass` | body mass, area, aspect ratio | wing mass, total mass |
-| `FlightEnvelope` | mass, area, `C_L,max` | wing loading, stall speed |
-
-The default bird is a wandering albatross to scale: 8.50 kg all told, 2.10 kg
-of it wing, on 0.65 m² spanning 3.44 m. That is an aspect ratio of 18.2, a
-best glide ratio of 19.7 and a stall speed of 11.8 m/s.
-
-**The section decides what kind of bird this is.** `AirfoilSection` is the
-model that matters most, and it was the last to be added. A thin, clean
-section has little profile drag and glides beautifully but stalls early; a
-thick, cambered one holds far more lift, which is what a hard turn needs, and
-pays for it in drag every second of the flight. One parameter walks between
-them:
-
-| section | `C_D0` | `C_L,max` | best glide ratio |
-| --- | --- | --- | --- |
-| 0.0 (thin, clean) | 0.025 | 1.20 | 27.8 |
-| 0.5 (nominal) | 0.033 | 1.50 | 24.2 |
-| 1.0 (thick, cambered) | 0.041 | 1.80 | 21.7 |
-
-`plot_polar` draws the drag polar and the glide ratio of any design, marking
-both the best-glide lift coefficient and the stall limit. `plot_section_trade`
-draws the table above as a curve.
-
-Without that coupling the problem answers the wrong question, and for a while
-it did. `C_L,max` was originally an independent constant that reached the
-dynamics through nothing at all: the limit the optimizer actually met was a
-hard-coded bound on the control. Measured that way the mission's sensitivity
-to maximum lift came out **exactly zero**, which reads like a physical finding
-and was an artefact of the wiring. The lift limit is now a path constraint
-tied to the wing, and the optimized cycle sits on it for most of its length,
-which makes it the most active constraint in the problem.
-
-**Aspect ratio reaches the maximum lift too.** Aspect ratio is not only an
-induced-drag story, and modelling it as one is what let the optimizer ask
-for a sailplane. `FiniteWing` adds the other half, in two layers that pull
-opposite ways.
-
-*The lift-curve slope.* A finite wing flies in its own downwash, so it needs
-a larger angle than the section to reach a given lift coefficient:
-`a = a0 / (1 + a0 / (pi e AR))`. A longer wing suffers less of that and holds a
-little more lift. Across the aspect ratios here it is worth about 4%: real,
-and far too small to carry the argument.
-
-*The Reynolds number, which is what bites.* The mean chord is `S / b`, so at
-fixed area a longer wing is a narrower one, and a narrower wing flies slower
-in Reynolds terms. Across the design box the chord runs 0.135 m to 0.360 m and
-the Reynolds number 1.8e5 to 4.9e5, which is exactly where a wing starts
-losing maximum lift and gaining profile drag:
-
-| Reynolds | `C_D0` | `C_L,max` |
-| --- | --- | --- |
-| 1.5e5 | ×1.23 | ×0.80 |
-| 1.8e5 (high-AR corner) | ×1.13 | ×0.88 |
-| 2.5e5 (nominal) | ×1.00 | ×1.00 |
-| 3.5e5 | ×0.87 | ×1.12 |
-
-`C_D0` scales as `Re^-0.4`, between the laminar `-0.5` and turbulent `-0.2`,
-and `C_L,max` saturates as `Re / (Re + Re_half)`. Both are calibrated choices
-rather than derivations, and both are normalized at the nominal bird so it
-keeps its section properties exactly. This is the standard reason small flyers
-cannot use sailplane aspect ratios.
-
-The effect on the answer is the point. Through two earlier passes **every**
-wing variable sat on a bound, because nothing charged aspect ratio for
-anything but structure, and a wing mass law was not enough to stop it even at
-7.6 kg of wing on a 14 kg bird. With the chord penalty in place the wing area
-settles at 0.628 m2, between its limits, and the aspect ratio drops from 27.4
-to 21.8.
-
-### The wind
-
-The profile is logarithmic, which is what a boundary layer over open water
-looks like:
-
-```text
-W(h) = w_ref ln(h / h0) / ln(h_ref / h0)
-```
-
-with `h0` the roughness length of the sea surface, 0.03 m, and `h_ref` the
-10 m at which the reference wind is quoted. The logarithm is singular at `h0`
-and the bird cannot fly into the water anyway, so the height is floored
-smoothly at 0.5 m before the logarithm is taken, which keeps the profile and
-its gradient finite without putting a kink in either.
-
-The gradient is what the bird actually lives off, and it is the reason the
-whole manoeuvre happens low down:
-
-| height | wind at `w_ref` = 12 m/s | gradient |
-| --- | --- | --- |
-| 1 m | 5.8 m/s | 2.07 1/s |
-| 5 m | 8.9 m/s | 0.41 1/s |
-| 10 m | 12.0 m/s | 0.21 1/s |
-| 30 m | 15.2 m/s | 0.07 1/s |
-
-Thirty times weaker at 30 m than at 1 m. `plot_wind_profile` draws both
-panels, and the gradient one needs a logarithmic axis to fit on the page. The
-roughness length `h0` and the reference wind `w_ref` are exactly the two
-quantities that carry uncertainty in this problem; see
-[UQ strategies comparison](#uq-strategies-comparison) below.
-
-### An example simulation
-
-No optimizer, no constraints: `soaring_cycle` builds a closed cycle directly
-from the shape the energy equation asks for, then **inverts the two
-rotational equations of motion** for the lift and bank that would fly it.
-Nothing here is solved; it is a construction, evaluated once.
-
-```{eval-rst}
-.. plot:: _ext/gallery/albatross_example_simulation.py
-   :include-source: false
-```
-
-The guessed cycle already comes close to closing, which is what makes it a
-usable starting point for the optimizations below rather than a stumbling
-block: see [The shape of the cycle](#the-shape-of-the-cycle) and
-[Three things that had to be got right](#three-things-that-had-to-be-got-right).
-
-## Optimization
-
-### What is the weakest wind it could live in?
+## What is the weakest wind it could live in?
 
 Now everything is free, and the cycle has to close completely, in speed as
 well as height and attitude. The wind gradient must pay for the drag exactly,
@@ -263,9 +36,9 @@ discretization:
 | 30 | 7.19 m/s | 23 s |
 
 (Those are with wider design bounds than the default; see
-{doc}`../guides/scenario` for how bounds are declared.)
+{doc}`../../guides/scenario` for how bounds are declared.)
 
-### How much can a fixed cycle gain?
+## How much can a fixed cycle gain?
 
 Before letting the optimizer choose the cycle, it is worth asking what a
 *prescribed* one can already do. The wind and the bird are fixed. The bird
@@ -290,7 +63,7 @@ prescribed cycle cannot sustain itself, above it the bird gains. This is the
 17.7 m/s "nothing free" row above, and the gap between it and 10.18 m/s is
 exactly what letting the optimizer choose the cycle buys.
 
-### What the optimizer is actually handed
+## What the optimizer is actually handed
 
 Problem statements written by hand go stale. `describe_problem` reads them off
 the transcribed problem instead, measuring the constraint sizes by evaluating
@@ -316,7 +89,7 @@ point, so a problem that reads as a handful of lines is a few hundred scalars
 by the time the optimizer sees it. Note also that `state.h` has one fewer
 component under A than under C: A pins its initial state, C frees it.
 
-### What the bird is flying for
+## What the bird is flying for
 
 Minimum wind is a strange thing to want. A real albatross is going somewhere,
 so formulation A takes a `mission`:
@@ -361,7 +134,7 @@ gives a glider; optimizing for cross-country speed gives something much closer
 to the bird.
 
 (the-shape-of-the-cycle)=
-### The shape of the cycle
+## The shape of the cycle
 
 The heading can come back to where it started in two ways, and the `offsets`
 mapping on `PeriodicityConstraint` is the only thing that distinguishes them:
@@ -380,7 +153,7 @@ it does find a neutral cycle, covering 94% of what the loop manages, so what
 fails in the first case is the search rather than the topology.
 
 (formulation-b-what-did-you-size-it-for)=
-### Formulation B: what did you size it for?
+## Formulation B: what did you size it for?
 
 Formulation C optimizes the wing and the cycle at once. That is not how the
 work is usually organized: the vehicle is settled first, against figures of
@@ -427,11 +200,11 @@ the area goes 0.500, 0.500, 0.900, 0.900 as the turn weight is swept, never
 stopping in between. The mission's optimum is **interior**, at 0.628. There is
 no weight that lands there, so no amount of hindsight would let the sequential
 route reproduce the co-design answer. This is exactly the setting the
-[Multiobjective optimization under uncertainty](#multiobjective-optimization-under-uncertainty)
+{ref}`Multiobjective optimization under uncertainty <multiobjective-optimization-under-uncertainty>`
 subsection below asks the next question of: does the forecast error the two
 wings face change this ranking?
 
-### What compiling costs
+## What compiling costs
 
 | size | variables | compile | compiled | eager | speedup | crossover |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -439,22 +212,22 @@ wings face change this ranking?
 | 16 | 135 | 0.27 s | 1.1 ms | 55.6 ms | 52x | 5 |
 
 Compiling pays within five evaluations here too; see
-{doc}`../guides/benchmarking` for the general shape of this measurement
-and {doc}`brachistochrone` for the same table on the smallest problem.
+{doc}`../../guides/benchmarking` for the general shape of this measurement
+and {doc}`../brachistochrone/index` for the same table on the smallest problem.
 
-### Optimization benchmarks
+## Optimization benchmarks
 
-```{image} ../_data/albatross/optimizer_study.png
+```{image} ../../_data/albatross/optimizer_study.png
 :alt: Optimizer benchmark on the albatross
 ```
 
 Reused from `benchmarks/baselines/albatross.json`. The albatross offers only
 collocation, so it carries no transcription study: a study that varies one
 thing needs at least two levels of it, and this problem does not have a
-second. See {doc}`../guides/benchmarking` for what that comparison measures
+second. See {doc}`../../guides/benchmarking` for what that comparison measures
 and how the baseline is kept current.
 
-### Weaker wind or a faster crossing
+## Weaker wind or a faster crossing
 
 The two things a soaring bird might want cannot both be had, and mNBI draws
 the trade directly rather than scalarizing it. Over a 300 m crossing:
@@ -476,7 +249,7 @@ on it has to be measured in the same two objectives, since a minimum wind
 taken without a distance requirement is a different quantity and will appear
 to dominate the front.
 
-### The time budget
+## The time budget
 
 The sprint asks for formulation C under five minutes on one core with
 fixed-step integration. It is not close:
@@ -490,111 +263,10 @@ Identical answers, and fixed stepping is the faster of the two, because an
 adaptive controller spends steps chasing a tolerance the optimizer never asked
 for. Eighty times inside the budget.
 
-## Optimization under uncertainty
-
-(uq-strategies-comparison)=
-### UQ strategies comparison
-
-The two uncertain quantities in this problem are the ones the wind profile
-above turns on: the reference wind `w_ref` and the sea-surface roughness
-`h0`. Propagated through the fixed-wind cycle's final specific energy
-(`energy`, the same quantity the mission `energy` above maximizes), with
-single shooting rather than collocation, since the states must be free to
-respond to a changed wind — see
-{doc}`../concepts/transcriptions`'s "Which one to use":
-
-Morris screening, at 60 evaluations, ranks the two variables in the same
-order Sobol indices confirm at 2048 evaluations, and the vmapped batch
-evaluator (8.2x on this study's 256-draw speedup measurement) is what makes
-running both affordable in the same study rather than a choice between
-them; see {doc}`../guides/uncertainty` for what that speedup is worth in
-general and the corrected, range-normalized elementary effect this ranking
-depends on.
-
-```{list-table}
-:header-rows: 1
-:widths: 25 25 25 25
-
-* - variable
-  - Morris mean effect
-  - Sobol first order
-  - Sobol total
-* - `w_ref`
-  - 249.0
-  - **0.752**
-  - **0.840**
-* - `roughness`
-  - 133.3
-  - 0.127
-  - 0.489
-```
-
-`w_ref` dominates both measures, at a fifth of the evaluations. `roughness`
-is worth keeping rather than dropping, though: its total index (0.489) is
-well above its first order (0.127), so a large share of its influence is in
-interaction with `w_ref` rather than acting alone — a screening that only
-looked at first-order Sobol, or that dropped `roughness` for having the
-smaller Morris effect, would have missed that its effect is conditional.
-
-Six estimators score against the same 4096-sample reference. Unlike the
-sail's arrival error, this response does not reward the analytic
-estimators:
-
-| estimator | model calls | seconds | mean error | std error |
-| --- | --- | --- | --- | --- |
-| sampling, vmapped | 128 | 0.37 | -6.5% | +6.9% |
-| sampling, looped | 128 | 2.82 | -6.5% | +6.9% |
-| Taylor, first order | 2 | 0.29 | -51.4% | -90.2% |
-| Taylor, second order | 6 | 0.65 | -45.0% | -85.8% |
-| chaos, 32 points | 32 | 0.12 | +25.1% | +517.4% |
-| chaos + gradients, 32 | 64 | 0.90 | -20.0% | +77.2% |
-
-Both Taylor rows miss the standard deviation by nearly an order of
-magnitude, and the second-order correction barely helps: the energy
-response to the wind is curved enough over this parameter range that a
-polynomial expansion around one point is the wrong tool, not merely an
-imprecise one. Unweighted chaos at 32 points is worse than either Taylor
-row on the spread, by a wide margin, which is the opposite of what
-{doc}`sail`'s UQ strategies comparison finds for the same estimator — the
-gradient-enhanced version at the same 32 points is the only one of the six
-within a factor of two of the reference spread. The contrast with the
-sail is the finding: which cheap estimator is trustworthy is a property of
-the response being estimated, not of the method in the abstract, and
-plain sampling, expensive as it looks in a table, is the one that does not
-depend on that judgment call.
-
-(multiobjective-optimization-under-uncertainty)=
-### Multiobjective optimization under uncertainty
-
-[Formulation B](#formulation-b-what-did-you-size-it-for) found that no
-sequential weighting of glide against manoeuvrability reproduces the
-co-design wing, because the vehicle merit is linear and its optimum sits at
-a vertex while the mission's sits in the interior. That comparison was run
-at one wind and one roughness. The question this subsection asks is whether
-the *ranking itself* — cruise-sized, dynamics-sized, co-designed — is stable
-once the forecast the bird was designed against is wrong.
-
-Both B-cruise and B-dynamics are frozen designs: fixed wings, flown by
-re-solving only the cycle for each wind draw. The co-design wing, by
-contrast, was never handed a wind to be robust to; it was optimized for the
-single worst wind it could sustain. Freezing each of the three wings and
-propagating the same `w_ref`/`roughness` uncertainty through its flown cycle
-is what makes them comparable on the same footing the UQ strategies
-comparison above was measured on.
-
-The structural finding above already answers half the question: since no
-convex combination of the two sizing objectives reaches the co-design wing,
-no re-weighting *in response to* a wind forecast can reach it either. What a
-propagated uncertainty adds is whether the cruise wing's near-miss (+2.9% on
-minimum wind, at one wind) is a robust near-miss or one that only holds at
-the nominal forecast — which is the practical version of the question a
-designer choosing between "size for cruise" and "co-design properly" is
-actually asking.
-
 ## Discussion
 
 Findings about this library, surfaced by the albatross, that do not belong
-under Physics, Optimization or Optimization under uncertainty.
+under the physics, the optimization or the uncertainty.
 
 ### Are these optima real?
 

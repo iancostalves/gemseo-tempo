@@ -23,9 +23,16 @@ published data, which would carry its own licence. It is separable,
 
 with ``shape`` a C2 spline that is zero inside the no-go cone and peaks on
 a reach, and ``saturation`` a smoothly saturating factor so the boat does
-not keep accelerating without limit in strong wind. Taking the absolute
-value of the true wind angle makes the polar symmetric between tacks by
-construction.
+not keep accelerating without limit in strong wind.
+
+It is a *fitted* polar, and deliberately so. Where a boat's speed comes
+from — a sail working on the apparent wind, balanced against the hull's
+resistance — is written out in :mod:`~gemseo_tempo.problems.sail.aero` and
+drawn on the problem's physics page, but solving that balance inside the
+dynamics costs about six times as much per evaluation, and this problem's
+uncertainty studies integrate the trajectory once per sampled wind. The
+table reproduces the same polar for a problem whose subject is the
+trajectory rather than the boat.
 
 The spline needs care near the no-go cone. Interpolating a table that
 drops steeply to zero makes a C2 spline **undershoot below zero**: with a
@@ -49,7 +56,14 @@ from gemseo_tempo.dynamics.tables import smooth_max
 from gemseo_tempo.dynamics.tables import smooth_table
 
 NO_GO_ANGLE = 30.0
-"""The true wind angle below which the boat cannot sail, in degrees."""
+"""The true wind angle below which the boat cannot sail, in degrees.
+
+Asserted here, because the polar is fitted. Where it *comes from* is the
+sail's lift-to-drag ratio: a sail can only pull the boat forward while
+``L sin(awa) > D cos(awa)``, so the cone closes where that stops holding.
+:mod:`~gemseo_tempo.problems.sail.aero` computes it from the surrogate
+coefficients, and the problem's physics page draws it.
+"""
 
 TWA_TABLE = (
     0.0,
@@ -158,6 +172,20 @@ def wind_saturation(tws):
 
 def boat_speed(twa_degrees, tws):
     """Return the boat speed for a wind angle and a wind speed.
+
+    The separable form: a shape in the wind angle times the wind speed,
+    saturating so the boat does not accelerate without limit.
+
+    This is a *fitted* polar, not a force balance. What a boat's speed
+    actually comes from — a sail working on the apparent wind against a
+    hull resisting through the water — is written out in
+    :mod:`~gemseo_tempo.problems.sail.aero` and drawn on the problem's
+    physics page, but it is kept out of the dynamics on purpose. Solving
+    the force balance inside the right-hand side costs six Newton steps per
+    evaluation, about six times this, and the sail's uncertainty studies
+    integrate the trajectory once per draw: the robust design study went
+    from minutes to hours. A table that reproduces the same polar is the
+    better trade for a problem whose point is the *trajectory*.
 
     Parameters
     ----------

@@ -24,24 +24,49 @@ sys.path.insert(0, str(Path(__file__).parents[2] / "docs" / "_ext"))
 from tempo_schemes import plot_transcription_scheme  # noqa: E402
 
 
-def test_the_scheme_draws_six_panels():
+def test_the_scheme_draws_nine_panels():
     figure = plot_transcription_scheme()
-    assert len(figure.axes) == 6
+    assert len(figure.axes) == 9
 
 
 def test_every_panel_is_labelled():
     figure = plot_transcription_scheme()
     titles = [axis.get_title() for axis in figure.axes]
-    assert any("Single shooting" in title for title in titles)
-    assert any("Collocation" in title for title in titles)
-    assert sum("control" in title for title in titles) == 2
-    assert sum("state" in title for title in titles) == 2
-    assert sum("dataflow" in title for title in titles) == 2
+    for method in ("Single shooting", "Multiple shooting", "Collocation"):
+        assert sum(title.startswith(method) for title in titles) == 3, method
+    assert sum("control" in title for title in titles) == 3
+    assert sum("state" in title for title in titles) == 3
+    assert sum("dataflow" in title for title in titles) == 3
 
 
-def test_the_dataflow_panels_carry_three_boxes_each():
+def test_the_n2_panels_carry_three_blocks_each():
     figure = plot_transcription_scheme()
     dataflow_axes = [axis for axis in figure.axes if "dataflow" in axis.get_title()]
-    assert len(dataflow_axes) == 2
+    assert len(dataflow_axes) == 3
     for axis in dataflow_axes:
-        assert len(axis.patches) == 3 + 3  # three boxes, three arrows
+        # Three blocks, plus one arrowhead patch per elbow; the elbows'
+        # straight runs are lines rather than patches.
+        expected = 3 + (3 if axis.get_title().startswith("Single") else 4)
+        assert len(axis.patches) == expected, axis.get_title()
+
+
+def test_only_a_defect_carrying_method_reports_back_to_the_optimizer():
+    """The one structural difference the N2 diagram exists to show.
+
+    Single shooting reaches the optimizer only through the objective;
+    multiple shooting and collocation hand it defects directly, which is
+    the extra off-diagonal cell and the reason their problems are larger
+    and sparser.
+    """
+    figure = plot_transcription_scheme()
+    labels = {
+        axis.get_title(): {text.get_text() for text in axis.texts}
+        for axis in figure.axes
+        if "dataflow" in axis.get_title()
+    }
+    assert "delta_2" in labels["Multiple shooting — dataflow"]
+    assert "zeta_c" in labels["Collocation — dataflow"]
+    single = labels["Single shooting — dataflow"]
+    assert not {"delta_2", "zeta_c"} & single
+    for panel in labels.values():
+        assert {"Opt", "Traj", "Obj", "f_obj", "s(t)"} <= panel

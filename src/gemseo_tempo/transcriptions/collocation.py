@@ -68,6 +68,44 @@ DEFECT_PREFIX = f"{CONSTRAINT_PREFIX}defect."
 """The output-name prefix of the Simpson defect constraints."""
 
 
+def _node_rates(state_space, control_nodes: Mapping, step) -> dict:
+    """Return the time-derivative of each control the model asks for.
+
+    There is no control *function* here to differentiate: under collocation
+    the node values are design variables and the control is linear between
+    them, so its rate is the slope of the segment, constant across that
+    segment. Each node is given the slope of the segment starting there and
+    the last node inherits the one before it, which is the same one-sided
+    reading the shooting path gets when it differentiates the piecewise
+    linear interpolant at a node.
+
+    Parameters
+    ----------
+    state_space
+        The model, read for which controls need rates.
+    control_nodes
+        The node values of each control.
+    step
+        The time between nodes.
+
+    Returns
+    -------
+    dict
+        The rates, keyed as the model expects to receive them.
+    """
+    rates = {}
+    for name in state_space.control_rates:
+        values = control_nodes[name]
+        slopes = (values[1:] - values[:-1]) / step
+        rates[state_space.rate_name(name)] = jnp.concatenate(
+            [
+                slopes,
+                slopes[-1:],
+            ]
+        )
+    return rates
+
+
 class HermiteSimpson(AbstractTranscription):
     """Hermite-Simpson direct collocation.
 
@@ -268,6 +306,11 @@ class HermiteSimpson(AbstractTranscription):
             else:
                 times = jnp.linspace(t0, t1, n_nodes)
             step = times[1] - times[0]
+            # Rates are handed to the model but never published as a
+            # trajectory of their own, so they are kept out of the dict the
+            # results are read from.
+            node_rates = _node_rates(state_space, control_nodes, step)
+            control_nodes_full = {**control_nodes, **node_rates}
 
             def rhs_point(t, s, u):
                 return state_space.rhs(t, s, u, theta)
@@ -275,7 +318,7 @@ class HermiteSimpson(AbstractTranscription):
             def output_point(t, s, u):
                 return state_space.output(t, s, u, theta)
 
-            rates = jax.vmap(rhs_point)(times, state_nodes, control_nodes)
+            rates = jax.vmap(rhs_point)(times, state_nodes, control_nodes_full)
             # Hermite midpoint states and linear midpoint controls.
             times_mid = 0.5 * (times[:-1] + times[1:])
             state_mid = {
@@ -287,9 +330,18 @@ class HermiteSimpson(AbstractTranscription):
                 name: 0.5 * (values[:-1] + values[1:])
                 for name, values in control_nodes.items()
             }
-            rates_mid = jax.vmap(rhs_point)(times_mid, state_mid, control_mid)
-            output_nodes = jax.vmap(output_point)(times, state_nodes, control_nodes)
-            output_mid = jax.vmap(output_point)(times_mid, state_mid, control_mid)
+            # A midpoint's rate is its own segment's slope, not the average
+            # of the two node rates: the control is linear across the
+            # segment, so the slope is constant over it.
+            control_mid_full = {
+                **control_mid,
+                **{name: values[:-1] for name, values in node_rates.items()},
+            }
+            rates_mid = jax.vmap(rhs_point)(times_mid, state_mid, control_mid_full)
+            output_nodes = jax.vmap(output_point)(
+                times, state_nodes, control_nodes_full
+            )
+            output_mid = jax.vmap(output_point)(times_mid, state_mid, control_mid_full)
 
             result = {TIMES: times}
             for name, values in state_nodes.items():
@@ -666,6 +718,14 @@ class HermiteSimpson(AbstractTranscription):
         def segment_defects(s_left, s_right, u_left, u_right, t_left, t_right, theta):
             """Return the Simpson defects of a single segment."""
             step = t_right - t_left
+            # The control is linear across the segment, so its rate is the
+            # segment slope and is the same at both ends and the midpoint.
+            rates = {
+                state_space.rate_name(name): (u_right[name] - u_left[name]) / step
+                for name in state_space.control_rates
+            }
+            u_left = {**u_left, **rates}
+            u_right = {**u_right, **rates}
             f_left = state_space.rhs(t_left, s_left, u_left, theta)
             f_right = state_space.rhs(t_right, s_right, u_right, theta)
             s_mid = {
@@ -676,6 +736,7 @@ class HermiteSimpson(AbstractTranscription):
             u_mid = {
                 name: 0.5 * (u_left[name] + u_right[name]) for name in control_names
             }
+            u_mid.update(rates)
             f_mid = state_space.rhs(0.5 * (t_left + t_right), s_mid, u_mid, theta)
             return {
                 name: (

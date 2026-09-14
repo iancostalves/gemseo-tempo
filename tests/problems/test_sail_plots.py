@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import numpy
+import pytest
 from matplotlib import pyplot
 
 from gemseo_tempo.problems.sail.plots import plot_angle_convention
@@ -72,3 +73,68 @@ def test_the_angle_convention_marks_the_no_go_cone():
     assert "no-go" in texts
     assert f"{NO_GO_ANGLE:.0f}" in texts
     assert len(axes.patches) >= 1
+
+
+def test_the_points_of_sail_are_all_named():
+    """The vocabulary figure has to carry the vocabulary."""
+    from gemseo_tempo.problems.sail.plots import plot_points_of_sail
+    from gemseo_tempo.problems.sail.polar import NO_GO_ANGLE
+
+    axes = plot_points_of_sail()
+    texts = " ".join(text.get_text() for text in axes.texts)
+    for name in ("close-hauled", "beam reach", "broad reach", "running"):
+        assert name in texts, name
+    assert "port tack" in texts
+    assert "starboard tack" in texts
+    assert "no-go zone" in texts
+    assert f"{NO_GO_ANGLE:.0f}" in texts
+
+
+def test_the_wind_triangle_closes():
+    """Drawn as vectors, so the arithmetic is the figure's own claim.
+
+    The apparent wind is the true wind minus the boat's velocity, and the
+    figure is only worth showing if the three arrows actually form that
+    triangle.
+    """
+    from gemseo_tempo.problems.sail.aero import apparent_wind
+    from gemseo_tempo.problems.sail.plots import plot_wind_triangle
+
+    axes = plot_wind_triangle(boat=5.0, twa_degrees=100.0, tws=10.0)
+    texts = " ".join(text.get_text() for text in axes.texts)
+    assert "apparent wind" in texts
+    assert "true wind" in texts
+
+    speed, angle = apparent_wind(5.0, 100.0, 10.0)
+    # The triangle the figure draws, checked against the model that
+    # computes it: |v_A| from the components, and the angle it comes from.
+    along = -10.0 * numpy.cos(numpy.radians(100.0)) - 5.0
+    across = -10.0 * numpy.sin(numpy.radians(100.0))
+    assert float(speed) == pytest.approx(float(numpy.hypot(along, across)), rel=1e-9)
+    assert abs(float(angle)) <= 180.0
+
+
+def test_the_sail_coefficients_show_where_the_polar_comes_from():
+    """Lift peaking at forty-five degrees, and a cone the drive implies."""
+    from gemseo_tempo.problems.sail.plots import plot_sail_coefficients
+
+    axes = plot_sail_coefficients()
+    assert len(axes) == 2
+    titles = [axis.get_title() for axis in axes]
+    assert any("Lift and drag" in title for title in titles)
+    assert any("push the boat" in title for title in titles)
+    for axis in axes:
+        assert axis.lines
+
+
+def test_the_new_figures_accept_existing_axes():
+    from gemseo_tempo.problems.sail.plots import plot_points_of_sail
+    from gemseo_tempo.problems.sail.plots import plot_sail_coefficients
+    from gemseo_tempo.problems.sail.plots import plot_wind_triangle
+
+    _, axes = pyplot.subplots()
+    assert plot_points_of_sail(axes) is axes
+    _, axes = pyplot.subplots()
+    assert plot_wind_triangle(axes=axes) is axes
+    _, pair = pyplot.subplots(1, 2)
+    assert plot_sail_coefficients(pair) is pair

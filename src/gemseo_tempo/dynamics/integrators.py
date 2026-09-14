@@ -323,6 +323,19 @@ class DiffraxIntegrator(AbstractIntegrator):
         """
         n_states = len(state_space.states)
         delayed = [c for c in controls if isinstance(c, DelayedControl)]
+        by_name = {control.name: control for control in controls}
+        rate_sources = {}
+        for name in state_space.control_rates:
+            control = by_name[name]
+            if isinstance(control, DelayedControl):
+                msg = (
+                    f"The state space asks for the time-derivative of {name!r},"
+                    " which is a delayed control carried as an extra state;"
+                    " its rate is a stage equation rather than a derivative"
+                    " of a function of time."
+                )
+                raise TypeError(msg)
+            rate_sources[name] = control
 
         def control_values_from(t, y, control_params):
             """Read control values at time t from the augmented state."""
@@ -334,6 +347,16 @@ class DiffraxIntegrator(AbstractIntegrator):
                     index += control.order
                 else:
                     values[control.name] = control(t, control_params[control.name])
+            for name in state_space.control_rates:
+                # The control is a differentiable function of time here, so
+                # its rate is the derivative of the same call the value came
+                # from, rather than a finite difference of it.
+                control = rate_sources[name]
+                values[state_space.rate_name(name)] = jax.grad(
+                    lambda time, params, control=control: jnp.reshape(
+                        control(time, params), ()
+                    )
+                )(t, control_params[name])
             return values
 
         def rhs(t, y, args):

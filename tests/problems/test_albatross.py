@@ -593,17 +593,43 @@ def test_the_model_figures_accept_existing_axes():
     assert plot_polar(axes=another) is another
     _, single = pyplot.subplots()
     assert plot_section_trade(single) is single
-    _, schematic_axes = pyplot.subplots()
+    _, schematic_axes = pyplot.subplots(1, 4)
     assert plot_cycle_schematic(schematic_axes) is schematic_axes
 
 
-def test_the_cycle_schematic_labels_both_legs():
+def test_the_cycle_schematic_draws_all_four_legs():
     """Pure geometry: nothing to solve, so it draws the same every time."""
     axes = plot_cycle_schematic()
-    texts = " ".join(text.get_text() for text in axes.texts)
-    assert "climb" in texts
-    assert "dive" in texts
-    assert len(axes.lines) >= 1
+    assert len(axes) == 4
+    titles = [axis.get_title() for axis in axes]
+    assert titles == ["Windward climb", "Upper turn", "Leeward descent", "Lower turn"]
+    for axis in axes:
+        assert len(axis.lines) >= 2  # the whole loop, and this leg's arc
+
+
+def test_the_schematic_climbs_upwind_and_descends_downwind():
+    """The half of the manoeuvre a side-on wave cannot show.
+
+    With the wind blowing towards ``+x``, the climb has to happen while
+    the heading points into it and the descent while it points with it; a
+    schematic that gets this backwards describes a cycle that loses energy
+    instead of gaining it.
+    """
+    from gemseo_tempo.problems.albatross.plots import PHASES
+    from gemseo_tempo.problems.albatross.plots import _cycle_track
+
+    legs = {name: (centre, height) for name, centre, height, _ in PHASES}
+    climb_heading = legs["Windward climb"][0]
+    descent_heading = legs["Leeward descent"][0]
+    # The heading is the phase, so its x component says upwind or downwind.
+    assert numpy.cos(climb_heading) < 0.0
+    assert numpy.cos(descent_heading) > 0.0
+
+    # And the turns bracket the climb in height, highest after it.
+    _, _, climb_height = _cycle_track(climb_heading)
+    _, _, top_height = _cycle_track(legs["Upper turn"][0])
+    _, _, bottom_height = _cycle_track(legs["Lower turn"][0])
+    assert bottom_height < climb_height < top_height
 
 
 # ------------------------------------------- aspect ratio reaches the lift

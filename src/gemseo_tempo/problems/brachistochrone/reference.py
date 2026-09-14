@@ -36,15 +36,30 @@ from gemseo_tempo.problems.brachistochrone.model import GRAVITY
 from gemseo_tempo.problems.brachistochrone.model import TARGET
 
 STORED_REFERENCES = {
-    ("friction", 2.0, 2.0, 9.81): 0.879061,
-    ("drag", 2.0, 2.0, 9.81): 0.847661,
+    ("friction", 2.0, 2.0, 9.81): 0.955676,
+    ("drag", 2.0, 2.0, 9.81): 0.847311,
 }
 """High-accuracy descent times, keyed by ``(variant, x_f, y_f, g)``.
 
-Computed at 200 segments and cross-checked between collocation and single
-shooting, which agree to 4.2e-4 s on the friction variant and 2.8e-6 s on
-the drag variant. Regenerate with
+Computed at 200 segments with a fixed step and cross-checked between
+collocation and single shooting. Regenerate with
 ``tools/generate_brachistochrone_references.py``.
+
+The two transcriptions agree to 1.1e-10 s on the drag variant and to 0.02%
+on the friction variant **at twenty segments**, but only to 13% at two
+hundred, and the value stored is collocation's. That gap is worth stating
+rather than averaging away. Friction here depends on the normal force,
+which carries a centripetal term in the control's turning rate, and the
+turning rate of a piecewise-linear control is piecewise constant: refining
+the grid does not refine it, it chops it finer. Collocation is stable
+across the refinement (0.9555 at twenty segments, 0.9557 at two hundred)
+because the rate it uses is the segment slope by construction; shooting
+integrates a right-hand side with a jump at every node and degrades.
+
+The friction reference is therefore the weakest number in this library, and
+a formulation that wanted it tighter would need the path angle as a state
+with its rate as the control, which is a different problem rather than a
+finer grid of this one.
 """
 
 

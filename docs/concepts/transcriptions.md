@@ -125,7 +125,7 @@ through the integrator, the same sequential chain differentiates exactly
 at a cost of roughly **one extra pass regardless of the number of
 variables** ({doc}`differentiation`), and just-in-time compilation
 amortizes the repeated evaluation the optimizer requires — see the AD
-benchmarks on {doc}`../problems/brachistochrone`, which measure exactly
+benchmarks on {doc}`../problems/brachistochrone/optimization`, which measure exactly
 this crossover. What remains of collocation's advantage is narrower but
 genuine: the sparsity of the constraint Jacobian, which a sparse optimizer
 can exploit, and the conditioning of long or stiff horizons, where the

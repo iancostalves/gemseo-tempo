@@ -390,3 +390,86 @@ def test_validation_errors():
                 rhs=lambda t, s, u, theta: {"x": theta["g"] * u["u"]},
             )
         )
+
+
+# ------------------------------------------- a model that reads a rate
+
+
+def rate_reading_space():
+    """x' = u_rate: the state ends up holding the control's total change.
+
+    Contrived on purpose. A model that integrates the control's own
+    time-derivative has an answer that can be written down — the control's
+    net change over the horizon — so a transcription that supplies the
+    wrong rate gives a visibly wrong number rather than a plausible one.
+    """
+    return StateSpace(
+        states=["x"],
+        controls=["u"],
+        rhs=lambda t, s, u, theta: {"x": u["u_rate"]},
+        control_rates=["u"],
+    )
+
+
+def make_rate_reading(transcription):
+    ramp = jnp.linspace(0.3, 1.1, 5)
+    return DynamicScenario(
+        state_space=rate_reading_space(),
+        integrator=DiffraxIntegrator(rtol=1e-11, atol=1e-11, n_save=11),
+        controls=(PiecewiseLinearControl("u", KNOTS, default_params=ramp),),
+        functionals=(Mayer("final_x", lambda t1, s1, theta: s1["x"]),),
+        boundary=BoundarySpec(s0={"x": 0.0}),
+        transcription=transcription,
+    )
+
+
+def test_shooting_integrates_the_control_rate():
+    """Integrating the rate of a ramp gives the ramp's own rise.
+
+    The control runs from 0.3 to 1.1 over the horizon, so the integral of
+    its rate is 0.8 whatever the interpolant does in between.
+    """
+    scenario = make_rate_reading(SingleShooting())
+    outputs = scenario.problem.jax_function(scenario.problem.input_defaults)
+    final = float(numpy.ravel(numpy.asarray(outputs["final_x"]))[0])
+    assert final == pytest.approx(0.8, rel=1e-6)
+
+
+def test_collocation_supplies_the_same_rate_to_its_defects():
+    """The collocation half of the same check, which must be read differently.
+
+    Collocation does not integrate: the states are design variables, so
+    evaluating it at a guess returns the guess. What says the rate arrived
+    is that the defects vanish at the *analytic* answer — here ``x(t) =
+    u(t) - u(0)``, since the model integrates the control's own rate. A
+    wrong rate leaves defects that do not cancel.
+    """
+    segments = 4
+    scenario = make_rate_reading(HermiteSimpson(num_segments=segments))
+    inputs = dict(scenario.problem.input_defaults)
+    control = numpy.asarray(inputs["control.u"])
+    inputs["state.x"] = numpy.asarray(control - control[0])[1:]
+    outputs = scenario.problem.jax_function(inputs)
+    defects = numpy.asarray(outputs["constraint.defect.x"])
+    assert numpy.max(numpy.abs(defects)) < 1e-9
+
+
+def test_a_rate_reading_model_is_refused_by_indirect_shooting():
+    """The one transcription that cannot express such a law.
+
+    With the control entering through its own derivative, stationarity of
+    the Hamiltonian stops being a pointwise condition on u, so the closed
+    form the indirect method is built on no longer holds. Better to say so
+    than to return a confidently wrong costate.
+    """
+    from gemseo_tempo.transcriptions import IndirectShooting
+
+    with pytest.raises(ValueError, match="time-derivative"):
+        DynamicScenario(
+            state_space=rate_reading_space(),
+            integrator=DiffraxIntegrator(rtol=1e-8, atol=1e-8, n_save=11),
+            controls=(),
+            functionals=(Mayer("final_x", lambda t1, s1, theta: s1["x"]),),
+            boundary=BoundarySpec(s0={"x": 0.0}),
+            transcription=IndirectShooting(),
+        )

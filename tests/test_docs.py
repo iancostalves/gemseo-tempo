@@ -95,7 +95,12 @@ def test_api_reference_lists_no_stale_modules():
 
 
 def test_every_documentation_page_is_reachable():
-    """Every page must appear in a toctree, or Sphinx warns and -W fails."""
+    """Every page must appear in a toctree, or Sphinx warns and -W fails.
+
+    Toctrees nest: a problem's sub-pages are listed by that problem's own
+    ``index.md``, which the root then lists. So a page counts as reachable
+    if the root names it or if its own directory's index does.
+    """
     index = (DOCS / "index.md").read_text(encoding="utf-8")
     pages = [
         path
@@ -106,7 +111,12 @@ def test_every_documentation_page_is_reachable():
         if path.name == "index.md" and path.parent == DOCS:
             continue
         entry = path.relative_to(DOCS).with_suffix("").as_posix()
-        assert entry in index, f"{entry} is in no toctree of docs/index.md"
+        if entry in index:
+            continue
+        local = path.parent / "index.md"
+        assert local.exists() and path.stem in local.read_text(encoding="utf-8"), (
+            f"{entry} is in no toctree, neither the root's nor its own section's"
+        )
 
 
 def test_quickstart_quotes_the_computed_descent_time():
@@ -145,6 +155,9 @@ def test_documented_extras_match_the_packaging():
         "concepts/transcriptions.md",
         "concepts/differentiation.md",
         "guides/scenario.md",
+        "problems/brachistochrone/physics.md",
+        "problems/sail/physics.md",
+        "problems/albatross/physics.md",
     ],
 )
 def test_key_pages_are_not_empty_stubs(page):
@@ -152,25 +165,31 @@ def test_key_pages_are_not_empty_stubs(page):
     assert len(text.splitlines()) > 20, f"{page} looks like a stub"
 
 
-@pytest.mark.parametrize(
-    "page", ["problems/albatross.md", "problems/brachistochrone.md", "problems/sail.md"]
-)
+PROBLEM_PAGES = [
+    f"problems/{problem}/{part}.md"
+    for problem in ("brachistochrone", "sail", "albatross")
+    for part in ("physics", "optimization", "uncertainty")
+]
+"""Every problem sub-page, in the order the documentation reads them."""
+
+
+@pytest.mark.parametrize("page", PROBLEM_PAGES)
 def test_problem_pages_generate_their_variable_tables(page):
     """The sprint's acceptance criterion, made executable.
 
     A variable table written by hand is a copy of the registry, and a copy
     of a number is a number that will be wrong later. Every problem page
-    therefore declares which model it is about and generates its tables
-    from that model's registry.
+    therefore declares which model it is about, and the page that describes
+    the model generates its tables from that model's registry — the other
+    two cite it rather than repeating it.
     """
     text = (DOCS / page).read_text(encoding="utf-8")
     assert "```{variable-context}" in text, f"{page} declares no model"
-    assert "```{variables}" in text, f"{page} generates no variable table"
+    if page.endswith("physics.md"):
+        assert "```{variables}" in text, f"{page} generates no variable table"
 
 
-@pytest.mark.parametrize(
-    "page", ["problems/albatross.md", "problems/brachistochrone.md", "problems/sail.md"]
-)
+@pytest.mark.parametrize("page", PROBLEM_PAGES)
 def test_problem_pages_reference_benchmark_pngs_that_exist(page):
     """A pre-rendered benchmark figure that is not on disk breaks the build.
 

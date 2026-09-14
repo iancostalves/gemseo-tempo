@@ -67,7 +67,7 @@ pass through untouched.
 A statics model is one whose every input is a declared constant or the
 output of another statics model. Such models can run once per optimizer
 iteration, ahead of the dynamics, instead of at every time step — the wing
-sizing chain in {doc}`../problems/albatross` is the motivating case.
+sizing chain in {doc}`../problems/albatross/index` is the motivating case.
 
 ```python
 from gemseo_tempo.statics import AutoModel, JAXModel, StaticsChain
@@ -179,8 +179,8 @@ gradient-based optimizers, so
 {func}`~gemseo_tempo.dynamics.tables.smooth_table` fits a C2 spline through
 table points instead, and `smooth_abs`, `smooth_max`, `smooth_min` and
 `smooth_clip` provide differentiable saturations, exact away from the bound
-and rounded over a small band near it — {doc}`../problems/sail`'s polar and
-{doc}`../problems/albatross`'s wind profile both depend on this.
+and rounded over a small band near it — {doc}`../problems/sail/index`'s polar and
+{doc}`../problems/albatross/index`'s wind profile both depend on this.
 
 Finally, {func}`~gemseo_tempo.dynamics.time_scaling.normalize_time`
 reformulates a state space on a normalized time in `[0, 1]`, scaling the
@@ -320,12 +320,12 @@ problem.set_initial_guess(trajectory)
 interpolates any {class}`~gemseo_tempo.dynamics.integrators.Trajectory`
 onto the node grid. With that in place the same problem converges to the
 exact cycloid time at every grid size tested, in 30 to 72 discipline
-calls. The packaged {doc}`brachistochrone <../problems/brachistochrone>`
+calls. The packaged {doc}`brachistochrone <../problems/brachistochrone/index>`
 does exactly this, and it is also what makes comparing transcriptions
 fair, since each one starts from the same physical trajectory. It matters
 beyond that one problem, too: the sail's channel-constrained legs have
 several local optima, and which one a solve lands in depends on where it
-started, not on the width of the channel — see {doc}`../problems/sail`.
+started, not on the width of the channel — see {doc}`../problems/sail/index`.
 
 Transcriptions that have no node grid, such as single shooting, raise
 `NotImplementedError` rather than pretend to accept a guess.

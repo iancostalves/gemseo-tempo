@@ -79,8 +79,10 @@ badly, so including them would compare failures rather than methods.
 :::
 
 Each problem's own optimizer, transcription and AD benchmarks are on its
-page, next to the result they benchmark: {doc}`../problems/brachistochrone`,
-{doc}`../problems/sail`, {doc}`../problems/albatross`.
+page, next to the result they benchmark:
+{doc}`../problems/brachistochrone/optimization`,
+{doc}`../problems/sail/optimization`,
+{doc}`../problems/albatross/optimization`.
 
 ## Three problems, not one
 

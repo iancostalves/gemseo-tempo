@@ -118,7 +118,7 @@ satisfies the dynamics. A linear ramp between the boundary states leaves
 `v = 0` everywhere, which makes `dx/dt = v cos(gamma)` degenerate: cold
 started that way, collocation misses this problem by **116% at 30 segments**.
 Seed it from a simulated trajectory instead, as
-{doc}`the packaged problem <../problems/brachistochrone>` does, and the error
+{doc}`the packaged problem <../problems/brachistochrone/index>` does, and the error
 drops to zero to five decimal places. See
 {doc}`../guides/scenario` for the mechanism.
 :::

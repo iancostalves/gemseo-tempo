@@ -277,74 +277,176 @@ def energy_budget(trajectory) -> dict[str, float]:
     }
 
 
-def plot_cycle_schematic(axes=None):
-    """Draw the dynamic-soaring cycle: climb into the gradient, dive out of it.
+PHASES = (
+    ("Windward climb", numpy.pi, "climbing", "tab:green"),
+    ("Upper turn", 1.5 * numpy.pi, "level, highest", "tab:blue"),
+    ("Leeward descent", 2.0 * numpy.pi, "descending", "tab:red"),
+    ("Lower turn", 2.5 * numpy.pi, "level, lowest", "tab:orange"),
+)
+"""The four legs of one loop: name, central phase, height, colour.
 
-    Pure geometry, no data: a side-on S-shaped path through a wind profile
-    drawn as arrows growing with height, with the climb and dive legs
-    labelled. This is the picture behind :doc:`../../problems/albatross`'s
-    "why the equations are not just a glide": energy is extracted by
-    repeatedly crossing a wind gradient, not by any single manoeuvre.
+The phases follow the cycle
+:func:`~gemseo_tempo.problems.albatross.problem.soaring_cycle` builds,
+where the heading winds through a full turn and the climb angle lags it by
+a quarter cycle. With the wind blowing towards ``+x``, that puts
+the climb where the bird is headed into the wind and the descent where it
+is headed with it, which is the whole manoeuvre.
+"""
+
+
+def _cycle_track(phase):
+    """Return the air-relative ground track and height of a loop.
+
+    Integrating the kinematics with the heading winding through a full
+    turn gives a closed loop in the air frame; the height follows the
+    climb angle a quarter cycle behind it.
+
+    Parameters
+    ----------
+    phase
+        The cycle phase, in radians.
+
+    Returns
+    -------
+    tuple
+        The crosswind-plane coordinates and the height, each normalized.
+    """
+    return numpy.sin(phase), -numpy.cos(phase), -numpy.sin(phase)
+
+
+def _phase_panel(axes, name, centre, height_label, colour, label_heading=False):
+    """Draw one leg of the cycle: the track from above, and the height.
 
     Parameters
     ----------
     axes
-        The axis to draw on; a new one when omitted.
-
-    Returns
-    -------
-    Axes
-        The axis drawn on.
+        The axis to draw on.
+    name
+        The leg name, used as the panel title.
+    centre
+        The phase at the middle of this leg, in radians.
+    height_label
+        What the height is doing on this leg.
+    colour
+        The colour of the highlighted arc.
+    label_heading
+        Whether to name the heading arrow, which only the first panel
+        needs to do.
     """
-    if axes is None:
-        _, axes = pyplot.subplots(figsize=(6.4, 4.4))
+    whole = numpy.linspace(0.0, 2.0 * numpy.pi, 240)
+    track_x, track_y, _ = _cycle_track(whole)
+    axes.plot(track_x, track_y, color="0.8", linewidth=1.2)
 
-    for height in numpy.linspace(0.5, 9.0, 9):
-        length = 0.15 + 0.10 * height
+    leg = numpy.linspace(centre - numpy.pi / 4, centre + numpy.pi / 4, 60)
+    leg_x, leg_y, _ = _cycle_track(leg)
+    axes.plot(leg_x, leg_y, color=colour, linewidth=2.6)
+
+    # The heading is the phase itself, so the arrow is the tangent.
+    point_x, point_y, height = _cycle_track(centre)
+    tip = (point_x + 0.5 * numpy.cos(centre), point_y + 0.5 * numpy.sin(centre))
+    axes.annotate(
+        "",
+        xy=tip,
+        xytext=(point_x, point_y),
+        arrowprops={"arrowstyle": "-|>", "color": colour, "linewidth": 2.0},
+    )
+    if label_heading:
+        axes.text(
+            tip[0],
+            tip[1] + 0.18,
+            "heading",
+            color=colour,
+            fontsize=8,
+            ha="center",
+        )
+
+    # The wind, blowing towards +x, against which the heading is read.
+    for offset in (1.42, 1.62):
         axes.annotate(
             "",
-            xy=(length, height),
-            xytext=(0.0, height),
-            arrowprops={"arrowstyle": "-|>", "color": "tab:blue", "alpha": 0.5},
+            xy=(0.45, offset),
+            xytext=(-0.75, offset),
+            arrowprops={"arrowstyle": "-|>", "color": "tab:cyan", "alpha": 0.8},
         )
-    axes.text(4.5, 9.7, "wind speed, growing with height", color="tab:blue", fontsize=9)
+    axes.text(0.52, 1.44, "wind", color="tab:cyan", fontsize=8, va="center")
 
-    path_t = numpy.linspace(0.0, 4.0 * numpy.pi, 400)
-    path_x = 1.2 * path_t
-    path_y = 4.5 + 3.8 * numpy.sin(path_t)
-    axes.plot(path_x, path_y, color="black", linewidth=1.8)
+    # A height bar on the right: where this leg sits in the gradient, and
+    # which way it is going. The wind arrows grow with height, which is
+    # the gradient the whole manoeuvre lives off.
+    bar_x = 1.95
+    axes.plot([bar_x, bar_x], [-1.05, 1.05], color="0.7", linewidth=1.0)
+    for level in numpy.linspace(-0.9, 0.9, 5):
+        axes.annotate(
+            "",
+            xy=(bar_x + 0.12 + 0.30 * (level + 1.0), level),
+            xytext=(bar_x + 0.12, level),
+            arrowprops={"arrowstyle": "-|>", "color": "tab:cyan", "alpha": 0.45},
+        )
+    axes.text(bar_x, 1.2, "height", fontsize=8, color="0.35", ha="center")
+    axes.plot([bar_x], [height], marker="o", color=colour, markersize=8, zorder=5)
+    if "level" not in height_label:
+        # Start clear of the marker, so the arrow reads as the direction
+        # of travel rather than as part of the marker.
+        rising = height_label == "climbing"
+        start = height + (0.16 if rising else -0.16)
+        axes.annotate(
+            "",
+            xy=(bar_x, start + (0.5 if rising else -0.5)),
+            xytext=(bar_x, start),
+            arrowprops={"arrowstyle": "-|>", "color": colour, "linewidth": 2.0},
+        )
 
-    # Steepest-climb and steepest-dive points of the second cycle (cos is
-    # the slope of a sine path), where there is room to annotate without
-    # colliding with the wind arrows or the first cycle.
-    climb_t = 2.0 * numpy.pi
-    dive_t = 3.0 * numpy.pi
     axes.text(
-        1.2 * climb_t,
-        4.5 + 0.9,
-        "climb\ninto the wind",
-        color="tab:green",
+        0.2,
+        -1.85,
+        height_label,
+        color=colour,
         fontsize=9,
         ha="center",
+        fontweight="bold",
     )
-    axes.text(
-        1.2 * dive_t,
-        4.5 - 1.3,
-        "dive\ndownwind",
-        color="tab:red",
-        fontsize=9,
-        ha="center",
-    )
-
-    axes.set_xlim(-0.5, path_x[-1] + 1.0)
-    axes.set_ylim(0.0, 11.0)
-    axes.set_xlabel("downwind distance")
-    axes.set_ylabel("height")
-    axes.set_title("One dynamic-soaring cycle")
+    axes.set_title(name, fontsize=10)
+    axes.set_xlim(-1.5, 2.95)
+    axes.set_ylim(-2.1, 1.95)
+    axes.set_aspect("equal")
     axes.set_xticks([])
     axes.set_yticks([])
     for spine in axes.spines.values():
         spine.set_visible(False)
+
+
+def plot_cycle_schematic(axes=None):
+    """Draw one soaring loop, decomposed into its four legs.
+
+    The manoeuvre is three-dimensional, and drawing it as a single
+    side-on wave hides the half of it that matters: the bird climbs while
+    headed *into* the wind, turns through the top of the gradient,
+    descends while headed *with* it, and turns back at the bottom. Each
+    panel shows the same loop from above, with one leg highlighted and the
+    heading drawn as the tangent, beside a height bar placing that leg in
+    the wind gradient.
+
+    Pure geometry, no data: the track is the closed air-relative loop the
+    kinematics give when the heading winds through a full turn, which is
+    the cycle :func:`~gemseo_tempo.problems.albatross.problem.soaring_cycle`
+    builds and the optimizer refines.
+
+    Parameters
+    ----------
+    axes
+        Four axes to draw on; a new figure when omitted.
+
+    Returns
+    -------
+    ndarray
+        The four axes drawn on.
+    """
+    if axes is None:
+        figure, axes = pyplot.subplots(1, 4, figsize=(11.5, 3.8))
+        figure.suptitle("One dynamic-soaring loop, leg by leg", fontsize=11)
+    axes = numpy.atleast_1d(axes)
+    for index, (axis, phase) in enumerate(zip(axes, PHASES, strict=True)):
+        _phase_panel(axis, *phase, label_heading=index == 0)
     return axes
 
 

@@ -52,16 +52,22 @@ def test_model_structure_and_registry():
     space = create_state_space()
     assert space.states == ("x", "y", "v")
     assert space.controls == ("gamma",)
-    assert space.parameters == ("g", "mu", "k_over_m")
+    assert space.parameters == ("g", "mu", "drag_coefficient")
+    # The centripetal part of the normal force needs the turning rate.
+    assert space.control_rates == ("gamma",)
     assert REGISTRY["v"].unit == "m/s"
     assert REGISTRY["gamma"].unit == "rad"
-    assert REGISTRY["k_over_m"].unit == "1/m"
+    assert REGISTRY["drag_coefficient"].unit == "dimensionless"
 
 
 def test_variant_constants():
-    assert variant_constants("ideal") == {"g": GRAVITY, "mu": 0.0, "k_over_m": 0.0}
+    assert variant_constants("ideal") == {
+        "g": GRAVITY,
+        "mu": 0.0,
+        "drag_coefficient": 0.0,
+    }
     assert variant_constants("friction")["mu"] > 0.0
-    assert variant_constants("drag")["k_over_m"] > 0.0
+    assert variant_constants("drag")["drag_coefficient"] > 0.0
     with pytest.raises(ValueError, match="Unknown variant"):
         variant_constants("rocket")
 
@@ -71,8 +77,8 @@ def test_ideal_dynamics_are_the_frictionless_ones():
     rates = space.rhs(
         0.0,
         {"x": 0.0, "y": 0.0, "v": 2.0},
-        {"gamma": 0.0},
-        {"g": GRAVITY, "mu": 0.0, "k_over_m": 0.0},
+        {"gamma": 0.0, "gamma_rate": 0.0},
+        {"g": GRAVITY, "mu": 0.0, "drag_coefficient": 0.0},
     )
     # Horizontal motion at gamma = 0, and no acceleration.
     assert float(rates["x"]) == pytest.approx(2.0)
@@ -202,19 +208,83 @@ def test_indirect_uses_the_analytic_path_angle():
 
 
 def test_analytic_path_angle_is_the_stationary_point():
-    """The closed form must zero dH/dgamma."""
+    """The closed form must zero dH/dgamma, where it applies.
+
+    Which is at a turn rate of zero. The closed form is the stationary
+    point of the classical friction law, ``mu g cos(gamma)``, and the
+    model's centripetal term vanishes exactly when ``dgamma/dt`` does; away
+    from there the control enters through its own rate and there is no
+    pointwise stationarity to find, which is why indirect shooting refuses
+    a model that reads a rate at all.
+    """
     import jax
     import jax.numpy as jnp
 
+    # Costates chosen to put the stationary angle inside the control's own
+    # bounds, where the wire is pushing. Beyond ninety degrees the normal
+    # force floors at zero and friction stops depending on the angle at
+    # all, so the closed form — which knows nothing of the floor — has
+    # nothing to be stationary against there.
     states = {"x": 0.3, "y": 0.4, "v": 2.0}
-    costates = {"x": -0.7, "y": -0.4, "v": -0.15}
+    costates = {"x": 0.7, "y": 1.0, "v": -0.15}
     theta = variant_constants("friction")
     space = create_state_space()
 
     def hamiltonian(angle):
-        rates = space.rhs(0.0, states, {"gamma": angle}, theta)
+        rates = space.rhs(0.0, states, {"gamma": angle, "gamma_rate": 0.0}, theta)
         return sum(costates[name] * rates[name] for name in ("x", "y", "v"))
 
     best = optimal_path_angle(0.0, states, costates, theta)["gamma"]
-    assert abs(float(jax.grad(hamiltonian)(float(best)))) < 1e-9
+    # Not machine zero: the normal force is floored with a smooth maximum,
+    # which leaves a trace of the floor even where it is not binding, so
+    # the closed form is stationary to the smoothing rather than exactly.
+    assert abs(float(jax.grad(hamiltonian)(float(best)))) < 1e-6
     assert jnp.isfinite(best)
+
+
+def test_every_uncertain_constant_reaches_the_dynamics():
+    """A declared uncertainty the model ignores is worse than no model.
+
+    The albatross learned this once: ``C_L,max`` was an independent
+    constant reaching the dynamics through nothing at all, and the
+    mission's sensitivity to it came out *exactly zero*, which reads like a
+    physical finding and was an artefact of the wiring. The brachistochrone
+    reintroduced it for one sprint — the friction term was dropped whenever
+    ``mu`` happened to be zero in a variant's constants, so the drag
+    variant's sensitivity to ``mu`` was exactly zero too — and a screening
+    caught it.
+
+    So: for every variant a study is run on, perturbing each uncertain
+    constant must move something. The ideal variant is exempt, and only it,
+    because there friction is zero by definition rather than by accident.
+    """
+    from gemseo_tempo.uncertainty import uncertain_names
+
+    names = uncertain_names(REGISTRY)
+    assert set(names) == {"g", "mu", "drag_coefficient"}
+
+    for variant in ("friction", "drag"):
+        scenario = create_scenario(SingleShooting(), variant=variant, size=8)
+        inputs = dict(scenario.problem.input_defaults)
+
+        def miss(values, scenario=scenario):
+            """Where the bead ends up, which is what a constant moves."""
+            outputs = scenario.problem.jax_function(values)
+            return numpy.array(
+                [
+                    float(numpy.ravel(outputs["constraint.final.x"])[0]),
+                    float(numpy.ravel(outputs["constraint.final.y"])[0]),
+                ]
+            )
+
+        base = miss(inputs)
+        for name in names:
+            perturbed = dict(inputs)
+            key = f"constant.{name}"
+            perturbed[key] = numpy.asarray(inputs[key], dtype=float) + 0.05
+            moved = numpy.max(numpy.abs(miss(perturbed) - base))
+            assert moved > 1e-9, (
+                f"the {variant} variant ignores {name!r}: perturbing it moves"
+                " the trajectory by nothing at all, so any sensitivity study"
+                " on it would report exactly zero and mean nothing"
+            )

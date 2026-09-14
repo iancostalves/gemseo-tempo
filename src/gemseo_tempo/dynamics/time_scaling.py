@@ -50,16 +50,37 @@ def normalize_time(state_space: StateSpace) -> StateSpace:
     if T_FINAL in state_space.parameters:
         raise ValueError(f"The state space already has a {T_FINAL!r} parameter.")
 
+    def to_physical_rates(u, t_final):
+        """Rescale control rates from normalized to physical time.
+
+        The controls are parameterized on τ, so a rate computed here is
+        ``du/dτ``; the inner model is written on physical time and wants
+        ``du/dt = (du/dτ) / t_f``. Forgetting this leaves every
+        rate-reading model wrong by the final time it was solved at, which
+        is a factor that changes as the optimizer moves.
+        """
+        if not state_space.control_rates:
+            return u
+        scaled = dict(u)
+        for name in state_space.control_rates:
+            key = state_space.rate_name(name)
+            scaled[key] = u[key] / t_final
+        return scaled
+
     def rhs(tau, s, u, theta):
         t_final = theta[T_FINAL]
         inner_theta = {k: v for k, v in theta.items() if k != T_FINAL}
-        rates = state_space.rhs(tau * t_final, s, u, inner_theta)
+        rates = state_space.rhs(
+            tau * t_final, s, to_physical_rates(u, t_final), inner_theta
+        )
         return {name: rate * t_final for name, rate in rates.items()}
 
     def output(tau, s, u, theta):
         t_final = theta[T_FINAL]
         inner_theta = {k: v for k, v in theta.items() if k != T_FINAL}
-        return state_space.output(tau * t_final, s, u, inner_theta)
+        return state_space.output(
+            tau * t_final, s, to_physical_rates(u, t_final), inner_theta
+        )
 
     return StateSpace(
         states=state_space.states,
@@ -68,4 +89,5 @@ def normalize_time(state_space: StateSpace) -> StateSpace:
         outputs=state_space.outputs,
         rhs=rhs,
         output=output,
+        control_rates=state_space.control_rates,
     )

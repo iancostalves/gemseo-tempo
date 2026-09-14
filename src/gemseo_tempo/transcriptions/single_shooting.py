@@ -439,6 +439,7 @@ class SingleShooting(AbstractTranscription):
                 outputs=state_space.outputs,
                 rhs=augmented_rhs,
                 output=augmented_output,
+                control_rates=state_space.control_rates,
             )
         if boundary.free_final_time:
             return normalize_time(augmented)

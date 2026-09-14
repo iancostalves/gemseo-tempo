@@ -5,13 +5,13 @@
   "feasible": true
  },
  "friction": {
-  "time": 0.8790660286326489,
-  "reference": 0.879061,
+  "time": 0.9555035308949094,
+  "reference": 0.955676,
   "feasible": true
  },
  "drag": {
-  "time": 0.8476611579525386,
-  "reference": 0.847661,
+  "time": 0.8473105969289259,
+  "reference": 0.847311,
   "feasible": true
  }
 }

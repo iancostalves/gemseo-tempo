@@ -86,7 +86,7 @@ def frozen():
 def test_the_registry_is_what_declares_an_uncertainty():
     """Distributions live with the variable, not in the analysis."""
     names = uncertain_names(REGISTRY)
-    assert set(names) == {"g", "mu", "k_over_m"}
+    assert set(names) == {"g", "mu", "drag_coefficient"}
     space = make_parameter_space(REGISTRY, names)
     assert space.uncertain_variables == list(names)
 
@@ -117,11 +117,12 @@ def test_an_unknown_variable_is_reported():
 
 
 def test_the_nominal_values_are_the_means():
-    values = nominal_values(REGISTRY, ["g", "mu", "k_over_m"])
+    values = nominal_values(REGISTRY, ["g", "mu", "drag_coefficient"])
     assert values["g"] == pytest.approx(9.81, abs=1e-6)
-    # Uniform on [0.02, 0.08] and [0.03, 0.07].
+    # Uniform on [0.02, 0.08] and, for a subcritical cylinder,
+    # on [1.0, 1.3].
     assert values["mu"] == pytest.approx(0.05, abs=1e-9)
-    assert values["k_over_m"] == pytest.approx(0.05, abs=1e-9)
+    assert values["drag_coefficient"] == pytest.approx(1.15, abs=1e-9)
 
 
 def test_a_prefix_names_the_variables_as_the_discipline_knows_them():

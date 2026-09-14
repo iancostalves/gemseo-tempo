@@ -21,12 +21,47 @@ The bead slides from the origin to a target point, and the path angle
 
     dx/dt = v cos(gamma)
     dy/dt = v sin(gamma)
-    dv/dt = g (sin(gamma) - mu cos(gamma)) - (k/m) v**2
+    dv/dt = g sin(gamma) - mu * (N/m) - (k/m) v**2
 
-The three physical variants differ only in their constants: ``mu = 0`` and
-``k/m = 0`` give the ideal frictionless case whose solution is a cycloid,
-a nonzero ``mu`` adds Coulomb friction, and a nonzero ``k/m`` adds
-quadratic drag.
+Two forces beyond gravity, each written from the object rather than from a
+convenient constant.
+
+**Friction** is Coulomb's law, so it is proportional to the *normal* force
+the wire actually exerts, which is not simply the normal component of
+weight. A bead on a curved path is also being turned, and the turn costs a
+centripetal force that the wire has to supply along with holding the bead
+up:
+
+.. code-block::
+
+    N/m = g cos(gamma) - v dgamma/dt
+
+The second term is the one usually dropped. It is kept here, which is why
+this model asks its transcription for the control's time-derivative (see
+:attr:`~gemseo_tempo.dynamics.state_space.StateSpace.control_rates`), and
+it is floored smoothly at zero: a wire can push a bead but not pull it, and
+an unfloored ``N`` turns negative in a hard turn, flips the sign of
+friction and *accelerates* the bead — which an optimizer will find.
+
+**Drag** is the standard quadratic law with the drag coefficient of the
+shape the bead actually is, a circular cylinder in cross-flow. Writing the
+mass as the cylinder's own volume times its density, the length cancels and
+the whole group collapses to a function of one length scale:
+
+.. code-block::
+
+    k/m = 0.5 rho_air Cd (d L) / (rho_bead (pi/4) d**2 L)
+        = 2 Cd rho_air / (pi rho_bead d)
+
+so nothing here is a number chosen to make the figure look right. What is
+uncertain is :data:`CYLINDER_DRAG_COEFFICIENT` itself, which for a cylinder
+genuinely moves with Reynolds number and surface finish, and that is where
+the declared distribution now sits.
+
+The three variants differ only in which of the two forces is switched on:
+``mu = 0`` with no drag gives the ideal frictionless case whose solution is
+a cycloid, a nonzero ``mu`` adds friction, and the drag variant gives the
+bead to the air.
 """
 
 from __future__ import annotations
@@ -34,21 +69,78 @@ from __future__ import annotations
 import jax.numpy as jnp
 
 from gemseo_tempo.dynamics.state_space import StateSpace
+from gemseo_tempo.dynamics.tables import smooth_max
 from gemseo_tempo.metadata.registry import VariableRegistry
 from gemseo_tempo.metadata.variable import Variable
 
-VARIANTS = {
-    "ideal": {"mu": 0.0, "k_over_m": 0.0},
-    "friction": {"mu": 0.3, "k_over_m": 0.0},
-    "drag": {"mu": 0.0, "k_over_m": 0.05},
-}
-"""The constants of each physical variant, beyond gravity."""
+CYLINDER_DRAG_COEFFICIENT = 1.2
+"""The drag coefficient of a circular cylinder in cross-flow.
+
+The textbook subcritical value, near enough constant over the Reynolds
+numbers a centimetre-scale bead at a few metres per second reaches. It is
+fixed rather than fitted: the point of writing drag this way is that the
+number comes from the shape.
+"""
+
+AIR_DENSITY = 1.225
+"""The density of air at sea level, in kg/m**3."""
+
+BEAD_DIAMETER = 0.020
+"""The diameter of the bead, in m: a 20 mm bead."""
+
+BEAD_DENSITY = 950.0
+"""The density of the bead, in kg/m**3: a dense plastic, close to water."""
 
 GRAVITY = 9.81
 """The standard gravitational acceleration, in m/s**2."""
 
 TARGET = (2.0, 2.0)
 """The default target point ``(x, y)``, in m."""
+
+NORMAL_FORCE_SMOOTHING = 1.0e-3
+"""How sharply the normal force is floored at zero, in m/s**2.
+
+Small against ``g``, so it changes nothing where the wire is pushing, and
+enough to leave the floor differentiable where it stops.
+"""
+
+
+def drag_over_mass(drag_coefficient) -> float:
+    """Return the quadratic drag group ``k/m`` of the bead, in 1/m.
+
+    Writing the mass as the cylinder's own volume times its density makes
+    the length cancel, so the group depends on the diameter alone:
+
+    .. code-block::
+
+        k/m = 0.5 rho_air Cd (d L) / (rho_bead (pi/4) d**2 L)
+            = 2 Cd rho_air / (pi rho_bead d)
+
+    Parameters
+    ----------
+    drag_coefficient
+        The drag coefficient; zero for the variants flying in vacuum.
+
+    Returns
+    -------
+    float
+        The drag coefficient divided by the bead mass, in 1/m.
+    """
+    return (
+        2.0 * drag_coefficient * AIR_DENSITY / (jnp.pi * BEAD_DENSITY * BEAD_DIAMETER)
+    )
+
+
+VARIANTS = {
+    "ideal": {"mu": 0.0, "drag_coefficient": 0.0},
+    "friction": {"mu": 0.3, "drag_coefficient": 0.0},
+    "drag": {"mu": 0.0, "drag_coefficient": CYLINDER_DRAG_COEFFICIENT},
+}
+"""The constants of each physical variant, beyond gravity.
+
+The ideal bead is both frictionless and in vacuum; the other two switch on
+one force each, so that what each costs can be read separately.
+"""
 
 REGISTRY = VariableRegistry(
     [
@@ -123,15 +215,22 @@ REGISTRY = VariableRegistry(
             tags=frozenset({"constant"}),
         ),
         Variable(
-            name="k_over_m",
-            full_name="Drag coefficient over mass",
-            description="Quadratic drag coefficient divided by the bead mass.",
-            unit="1/m",
+            name="drag_coefficient",
+            full_name="Drag coefficient",
+            description=(
+                "The drag coefficient of the bead, a circular cylinder in"
+                " cross-flow. Fixed by the shape rather than fitted, and"
+                " uncertain where a cylinder's really is: a subcritical"
+                " cylinder runs about 1.0 to 1.3 with Reynolds number and"
+                " surface finish. The quadratic drag the dynamics feel"
+                " follows from it and the bead's geometry."
+            ),
+            unit="dimensionless",
             lower_bound=0.0,
             distribution={
                 "name": "OTUniformDistribution",
-                "minimum": 0.03,
-                "maximum": 0.07,
+                "minimum": 1.0,
+                "maximum": 1.3,
             },
             tags=frozenset({"constant"}),
         ),
@@ -148,6 +247,39 @@ REGISTRY = VariableRegistry(
 """The metadata of every variable of the problem."""
 
 
+def normal_over_mass(speed, angle, turn_rate, gravity):
+    """Return the normal force the wire exerts, per unit mass.
+
+    Newton's law perpendicular to the path. Gravity contributes
+    ``g cos(gamma)``; turning the bead costs ``v dgamma/dt``, which the
+    wire also has to supply, and which the usual textbook treatment drops.
+
+    The result is floored smoothly at zero because a wire pushes and does
+    not pull. Left unfloored, a hard enough turn drives the normal force
+    negative, friction changes sign, and the model quietly says that
+    rubbing against the wire makes the bead faster.
+
+    Parameters
+    ----------
+    speed
+        The speed along the path, in m/s.
+    angle
+        The path angle below the horizontal, in rad.
+    turn_rate
+        The rate of change of the path angle, in rad/s.
+    gravity
+        The gravitational acceleration, in m/s**2.
+
+    Returns
+    -------
+    Array
+        The normal force per unit mass, in m/s**2, never negative.
+    """
+    return smooth_max(
+        gravity * jnp.cos(angle) - speed * turn_rate, 0.0, NORMAL_FORCE_SMOOTHING
+    )
+
+
 def brachistochrone_rhs(t, s, u, theta):
     """Return the state rates of the bead.
 
@@ -158,9 +290,45 @@ def brachistochrone_rhs(t, s, u, theta):
     s
         The states ``x``, ``y`` and ``v``.
     u
+        The control ``gamma`` and its rate ``gamma_rate``.
+    theta
+        The constants ``g``, ``mu`` and ``drag_coefficient``.
+
+    Returns
+    -------
+    dict
+        The rate of each state.
+    """
+    angle = u["gamma"]
+    speed = s["v"]
+    normal = normal_over_mass(speed, angle, u["gamma_rate"], theta["g"])
+    return {
+        "x": speed * jnp.cos(angle),
+        "y": speed * jnp.sin(angle),
+        "v": theta["g"] * jnp.sin(angle)
+        - theta["mu"] * normal
+        - drag_over_mass(theta["drag_coefficient"]) * speed**2,
+    }
+
+
+def frictionless_rhs(t, s, u, theta):
+    """Return the state rates of a bead that does not rub.
+
+    The same model as :func:`brachistochrone_rhs` with the friction term
+    dropped rather than multiplied by a zero coefficient, so that nothing
+    asks for the control's rate and the indirect transcription stays
+    available.
+
+    Parameters
+    ----------
+    t
+        The time.
+    s
+        The states ``x``, ``y`` and ``v``.
+    u
         The control ``gamma``.
     theta
-        The constants ``g``, ``mu`` and ``k_over_m``.
+        The constants ``g`` and ``drag_coefficient``; ``mu`` is ignored.
 
     Returns
     -------
@@ -172,16 +340,28 @@ def brachistochrone_rhs(t, s, u, theta):
     return {
         "x": speed * jnp.cos(angle),
         "y": speed * jnp.sin(angle),
-        "v": theta["g"] * (jnp.sin(angle) - theta["mu"] * jnp.cos(angle))
-        - theta["k_over_m"] * speed**2,
+        "v": theta["g"] * jnp.sin(angle)
+        - drag_over_mass(theta["drag_coefficient"]) * speed**2,
     }
 
 
-def create_state_space() -> StateSpace:
+def create_state_space(friction: bool = True) -> StateSpace:
     """Build the state space of the bead.
 
     The same model covers every variant: the ideal case is recovered by
-    setting ``mu`` and ``k_over_m`` to zero.
+    setting ``mu`` and ``drag_coefficient`` to zero.
+
+    Parameters
+    ----------
+    friction
+        Whether the bead rubs against the wire. Only a model with friction
+        needs the normal force, and only the normal force needs the
+        control's time-derivative, so a frictionless variant is built
+        without asking for it. That is not a detail: a model that asks for
+        a control rate cannot be transcribed by indirect shooting, since
+        the control then enters the Hamiltonian through its own derivative,
+        and the frictionless bead is exactly the case the indirect method
+        is demonstrated on.
 
     Returns
     -------
@@ -191,8 +371,9 @@ def create_state_space() -> StateSpace:
     return StateSpace(
         states=["x", "y", "v"],
         controls=["gamma"],
-        parameters=["g", "mu", "k_over_m"],
-        rhs=brachistochrone_rhs,
+        parameters=["g", "mu", "drag_coefficient"],
+        rhs=brachistochrone_rhs if friction else frictionless_rhs,
+        control_rates=["gamma"] if friction else (),
     )
 
 

@@ -95,9 +95,9 @@ guides/uncertainty
 :hidden:
 :caption: Problems
 
-problems/albatross
-problems/brachistochrone
-problems/sail
+problems/brachistochrone/index
+problems/sail/index
+problems/albatross/index
 ```
 
 ```{toctree}

@@ -98,6 +98,16 @@ def optimal_path_angle(t, s, lam, theta):
     solved here in closed form. Quadratic drag does not enter, having no
     dependence on the path angle.
 
+    This is the stationary point of the *classical* friction law, with the
+    normal force taken as ``g cos(gamma)`` alone. The model's centripetal
+    term ``- v dgamma/dt`` puts the control into the Hamiltonian through
+    its own derivative, where stationarity is no longer a pointwise
+    condition and no closed form of this kind exists; that is why a model
+    carrying it is refused by
+    :class:`~gemseo_tempo.transcriptions.IndirectShooting`, and why the
+    indirect route is used on the frictionless bead, where the two laws
+    coincide because the friction coefficient is zero.
+
     Parameters
     ----------
     t
@@ -128,6 +138,7 @@ def simulate_guess(
     guess: Guess,
     constants: dict[str, float],
     n_save: int = 61,
+    friction: bool = True,
 ):
     """Integrate the dynamics under the guessed control law.
 
@@ -139,6 +150,11 @@ def simulate_guess(
         The variant constants.
     n_save
         The number of points of the returned trajectory.
+    friction
+        Whether the bead rubs against the wire. The default keeps the
+        friction term live even where ``mu`` is zero, so that a study
+        varying ``mu`` sees a model that responds to it; pass ``False``
+        only for the ideal variant, where friction is zero by definition.
 
     Returns
     -------
@@ -150,7 +166,7 @@ def simulate_guess(
     control = PiecewiseLinearControl("gamma", times, default_params=guess.angles(21))
     integrator = DiffraxIntegrator(rtol=1e-8, atol=1e-8, n_save=n_save)
     return integrator.integrate(
-        create_state_space(),
+        create_state_space(friction=friction),
         {"x": 0.0, "y": 0.0, "v": 0.0},
         (control,),
         {"gamma": control.default_params},
@@ -220,7 +236,15 @@ def create_scenario(
         )
     )
     scenario = DynamicScenario(
-        state_space=create_state_space(),
+        # Friction is dropped for the ideal variant alone, where it is zero
+        # by definition. It is *not* dropped merely because mu happens to
+        # be zero in this variant's constants: mu is a declared uncertain
+        # parameter, and a model that ignores one reports a sensitivity of
+        # exactly zero to it, which reads like a physical finding and is an
+        # artefact of the wiring. That is the albatross's hardcoded lift
+        # limit all over again, and it was reintroduced here for one sprint
+        # before a screening caught it.
+        state_space=create_state_space(friction=variant != "ideal"),
         integrator=integrator
         or DiffraxIntegrator(rtol=1e-9, atol=1e-9, n_save=size + 1),
         controls=controls,

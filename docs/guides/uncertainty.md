@@ -119,11 +119,20 @@ ranking = screen(scenario, REGISTRY, names, "constraint.final.y").ranking
 result = sobol_indices(scenario, REGISTRY, names, "constraint.final.y")
 ```
 
-On the brachistochrone, Morris ranks drag above friction above gravity for 80
-evaluations. Sobol then confirms exactly that ordering, 0.65 and 0.34 and 0.02,
-for 20480 evaluations that take 434 ms because they go through together. The
-cheap ranking was right, for 0.4% of the cost. Gravity is in the list on purpose:
-it is known to three decimal places, and a screening ought to be able to say so.
+On the brachistochrone, Morris ranks friction above drag above gravity for
+80 evaluations. Sobol then confirms exactly that ordering, with total
+indices of 0.92, 0.07 and 0.01, for 20480 evaluations. The cheap ranking was
+right, for a fraction of the cost. Gravity is in the list on purpose: it is
+known to three decimal places, and a screening ought to be able to say so.
+
+That ordering used to be the other way round, and the reason it flipped is
+worth more than the ordering itself. Drag led while its coefficient was a
+number sampled over 0.03 to 0.07 with nothing behind those bounds; once it
+was derived from a cylinder's own drag coefficient — genuinely uncertain,
+but only over 1.0 to 1.3 — its spread narrowed, while friction picked up the
+centripetal part of the normal force and grew. **A screening ranks the
+uncertainties you declared, so it is only ever as meaningful as the
+distributions are.** See {doc}`../problems/brachistochrone/uncertainty`.
 
 ## Six ways to the same number
 
@@ -131,7 +140,7 @@ it is known to three decimal places, and a screening ought to be able to say so.
 deviation of one quantity several ways and scores them against a large
 sample: sampling (vmapped and looped), first- and second-order Taylor, and
 polynomial chaos with and without gradient enhancement. See the UQ
-strategies comparison on {doc}`../problems/sail` for what that comparison
+strategies comparison on {doc}`../problems/sail/uncertainty` for what that comparison
 looks like on a real analysis, and the warning that follows it about what
 an estimator that depends on derivatives depends on.
 
@@ -186,7 +195,7 @@ deliberate:
   logistic in the constraint value stands in for it. The width is a modelling
   choice, reported rather than buried: too wide and the constraint is not the
   one you asked for, too narrow and the gradient vanishes again. At the width
-  used on {doc}`../problems/sail`'s margin design it agrees with the counted
+  used on {doc}`../problems/sail/uncertainty`'s margin design it agrees with the counted
   fraction to about a point.
 
 ## What a safety margin costs
@@ -196,4 +205,4 @@ of parameter values can be a coin flip under an uncertain one, a margin is
 the conventional repair and it is not monotone in what it buys, and putting
 the probability directly in the problem can dominate the margin outright,
 both faster and more reliable at once. See the main result on
-{doc}`../problems/sail` for the numbers this plays out with.
+{doc}`../problems/sail/uncertainty` for the numbers this plays out with.
