@@ -63,12 +63,14 @@ from typing import TYPE_CHECKING
 import jax
 import jax.numpy as jnp
 import numpy
+from gemseo_jax.jax_discipline import JAXDiscipline
 
 from gemseo_tempo.uncertainty.batch import CONSTANT_PREFIX
 from gemseo_tempo.uncertainty.batch import _quantity
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from collections.abc import Iterable
     from collections.abc import Sequence
 
 MEAN = "mean"
@@ -182,6 +184,102 @@ def statistics_function(
     return statistics
 
 
+class GroupedJAXDiscipline(JAXDiscipline):
+    """A JAX discipline whose Jacobian is taken one group of outputs at a time.
+
+    Reverse mode costs a pass per output row, and each pass runs back
+    through everything the outputs are computed from together. A robust
+    discipline returns the transcription's constraints, computed on the
+    nominal trajectory, beside statistics computed over a whole sample;
+    differentiated as one, every constraint row is back-propagated through
+    every draw although none depends on them, and an iteration costs as
+    many passes through the sample as there are constraint rows. Taken
+    group by group, each compiled transform keeps only what its outputs
+    need, so the constraints are differentiated on the one trajectory and
+    the handful of statistics through the sample.
+    """
+
+    def __init__(
+        self, *args, groups: Sequence[Sequence[str]], forward: bool = False, **kwargs
+    ) -> None:
+        """Store the output groups.
+
+        Parameters
+        ----------
+        *args
+            The positional arguments of
+            :class:`~gemseo_jax.jax_discipline.JAXDiscipline`.
+        groups
+            The output names, partitioned into the groups differentiated
+            together.
+        forward
+            Whether to differentiate in forward mode rather than reverse.
+        **kwargs
+            The keyword arguments of the base discipline.
+        """
+        self._groups = [tuple(group) for group in groups]
+        self._transform = jax.jacfwd if forward else jax.jacrev
+        self._compiled_groups: dict[tuple, Callable] = {}
+        super().__init__(*args, **kwargs)
+
+    def _group_jacobian(self, outputs: tuple, inputs: tuple, data: dict) -> dict:
+        """Differentiate one group of outputs.
+
+        Parameters
+        ----------
+        outputs
+            The outputs of the group.
+        inputs
+            The inputs to differentiate with respect to.
+        data
+            The full input data.
+
+        Returns
+        -------
+        dict
+            ``{output: {input: array}}``.
+        """
+        key = (outputs, inputs)
+        compiled = self._compiled_groups.get(key)
+        if compiled is None:
+
+            def subset(differentiated, fixed):
+                values = self.jax_out_func({**fixed, **differentiated})
+                return {name: values[name] for name in outputs}
+
+            compiled = jax.jit(self._transform(subset))
+            self._compiled_groups[key] = compiled
+        return compiled({name: data[name] for name in inputs}, data)
+
+    def _compute_jacobian(
+        self,
+        input_names: Iterable[str] = (),
+        output_names: Iterable[str] = (),
+    ) -> None:
+        """Assemble the Jacobian group by group."""
+        data = {name: self.io.data[name] for name in self.input_grammar.names}
+        inputs = tuple(self._differentiated_input_names)
+        wanted = set(self._differentiated_output_names)
+        jacobian = {}
+        for group in self._groups:
+            outputs = tuple(name for name in group if name in wanted)
+            if outputs:
+                jacobian.update(self._group_jacobian(outputs, inputs, data))
+        sizes = {name: numpy.asarray(value).size for name, value in data.items()}
+        self.jac = {
+            output: {
+                name: (
+                    numpy.atleast_2d(numpy.asarray(block)).reshape((-1, 1))
+                    if sizes[name] == 1
+                    else numpy.atleast_2d(numpy.asarray(block))
+                )
+                for name, block in inner.items()
+            }
+            for output, inner in jacobian.items()
+        }
+        self._has_jacobian = True
+
+
 def robust_discipline(
     scenario,
     uncertain: Sequence[str],
@@ -218,7 +316,9 @@ def robust_discipline(
     now integrates the trajectory once per draw in the sample, so a
     256-draw sample makes each iteration 257 integrations. That is what
     designing against a probability costs, and vectorizing is what makes it
-    one dispatch rather than 257.
+    one dispatch rather than 257. Its derivative costs a few reverse passes
+    through the sample, one per statistic, because the Jacobian is taken
+    group by group; see :class:`GroupedJAXDiscipline`.
 
     Parameters
     ----------
@@ -249,8 +349,6 @@ def robust_discipline(
         One discipline producing every transcription output and, in
         addition, ``"<quantity>.<statistic>"`` for each statistic.
     """
-    from gemseo_jax.jax_discipline import JAXDiscipline
-
     problem = scenario.problem
     statistics = statistics_function(
         scenario,
@@ -274,18 +372,17 @@ def robust_discipline(
             outputs[f"{quantity}.{statistic}"] = jnp.atleast_1d(values[statistic])
         return outputs
 
-    return JAXDiscipline(
+    statistic_outputs = [f"{quantity}.{statistic}" for statistic in statistic_names]
+    method = JAXDiscipline.DifferentiationMethod(scenario.differentiation_method)
+    return GroupedJAXDiscipline(
         function=function,
         input_names=list(problem.input_defaults),
-        output_names=[
-            *problem.output_names,
-            *(f"{quantity}.{statistic}" for statistic in statistic_names),
-        ],
+        output_names=[*problem.output_names, *statistic_outputs],
         default_inputs=problem.input_defaults,
-        differentiation_method=JAXDiscipline.DifferentiationMethod(
-            scenario.differentiation_method
-        ),
+        differentiation_method=method,
         name=name,
+        groups=(problem.output_names, statistic_outputs),
+        forward=method == JAXDiscipline.DifferentiationMethod.FORWARD,
     )
 
 

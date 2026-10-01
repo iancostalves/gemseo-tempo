@@ -24,6 +24,7 @@ import numpy
 import pytest
 
 from gemseo_tempo.dynamics.integrators import DiffraxIntegrator
+from gemseo_tempo.problems.sail import CORRIDOR_HALF_WIDTH
 from gemseo_tempo.problems.sail import LEGS
 from gemseo_tempo.problems.sail import NO_GO_ANGLE
 from gemseo_tempo.problems.sail import best_vmg_angle
@@ -205,15 +206,21 @@ def test_unknown_leg_is_rejected():
         create_scenario(leg="sideways")
 
 
-def test_indirect_shooting_is_refused_with_constraints():
-    """Path constraints change the necessary conditions, so indirect refuses."""
-    with pytest.raises(ValueError, match="does not support explicit constraints"):
-        create_scenario(
-            transcription=IndirectShooting(),
-            leg="downwind",
-            size=SIZE,
-            channel_half_width=150.0,
-        )
+def test_indirect_shooting_takes_the_channel_as_a_penalty():
+    """A path constraint enters the Hamiltonian rather than the optimizer.
+
+    Indirect shooting solves the necessary conditions, so the channel is not
+    handed to the optimizer as a constraint: it is folded into the running
+    cost as a penalty, and the residual is all there is to drive to zero.
+    """
+    scenario = create_scenario(
+        transcription=IndirectShooting(),
+        leg="downwind",
+        size=SIZE,
+        channel_half_width=150.0,
+    )
+    assert scenario.problem.constraint_names == []
+    assert "residual" in scenario.problem.output_names
 
 
 def test_tacking_emerges(collocation_result):
@@ -459,3 +466,13 @@ def test_a_wrong_adjoint_is_refused_rather_than_used():
             size=6,
             integrator=DiffraxIntegrator(dt0=1.0 / 100, n_save=7),
         )
+
+
+def test_the_race_is_sailed_inside_a_corridor_by_default():
+    """North and south are bounded unless asked otherwise."""
+    bounded = create_scenario(size=4)
+    free = create_scenario(size=4, channel_half_width=None)
+    names = [name for name, _ in bounded.problem.constraint_names]
+    assert "constraint.channel" in names
+    assert "constraint.channel" not in [n for n, _ in free.problem.constraint_names]
+    assert CORRIDOR_HALF_WIDTH == 500.0

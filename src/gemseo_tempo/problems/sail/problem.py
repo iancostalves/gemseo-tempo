@@ -145,6 +145,14 @@ def sail_integrator(**settings) -> DiffraxIntegrator:
     return DiffraxIntegrator(**settings)
 
 
+CORRIDOR_HALF_WIDTH = 500.0
+"""How far north or south of the rhumb line the boat may sail, in m.
+
+A race is sailed in a bounded area. Without one the optimum is free to
+wander as far across the wind as a gybe angle takes it, which on the
+upwind leg is a long way and nothing like a race.
+"""
+
 LEGS = {
     # The wind blows east, so the mark to the east is dead downwind and the
     # mark to the west is dead upwind.
@@ -286,7 +294,7 @@ def create_scenario(
     guess: Guess | None = None,
     wind_name: str = "uniform",
     enforce_no_go: bool = False,
-    channel_half_width: float | None = None,
+    channel_half_width: float | None = CORRIDOR_HALF_WIDTH,
     integrator=None,
     check_adjoint: bool = True,
     **scenario_settings,
@@ -314,7 +322,8 @@ def create_scenario(
         the constraint only forbids the crossing a tack is made of.
     channel_half_width
         The distance either side of the rhumb line the boat may use, in
-        m; unconstrained when omitted.
+        m: the race area, :data:`CORRIDOR_HALF_WIDTH`, by default, and
+        unconstrained when ``None``.
     integrator
         The execution model of the dynamics; an adaptive integrator with
         the adjoint this problem needs when omitted. Worth passing when

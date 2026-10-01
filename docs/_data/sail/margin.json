@@ -1,46 +1,56 @@
 {
  "half_width": 150.0,
  "target": 0.95,
+ "design_sample": 256,
  "designs": [
   {
    "name": "deterministic",
-   "objective": 160.2420642050563,
-   "reliability": 0.5365,
-   "quantile": 53.044983858380704,
-   "worst": 120.50450554508507,
-   "across": 150.0000000158948
+   "objective": 159.7609358866465,
+   "reliability": 0.5215,
+   "quantile": 55.917458390698194,
+   "worst": 126.25472192928402,
+   "across": 149.99999999856217
   },
   {
    "name": "margin 25 m",
-   "objective": 162.75917902935163,
-   "reliability": 0.82425,
-   "quantile": 20.89572119294858,
-   "worst": 78.20047462942662,
-   "across": 125.00000001168348
+   "objective": 160.89563944511002,
+   "reliability": 0.80725,
+   "quantile": 23.799364207284334,
+   "worst": 84.13724393416578,
+   "across": 125.00000049925198
   },
   {
    "name": "margin 50 m",
-   "objective": 161.72388117171013,
-   "reliability": 0.96975,
-   "quantile": -8.185613683384991,
-   "worst": 42.68971673509148,
-   "across": 99.99999942676077
+   "objective": 160.90890579497108,
+   "reliability": 0.964,
+   "quantile": -5.744537349271205,
+   "worst": 47.59171016336944,
+   "across": 96.28063849131703
   },
   {
    "name": "margin 75 m",
-   "objective": 160.71584900319652,
-   "reliability": 0.999,
-   "quantile": -35.16921309386243,
-   "worst": 6.659065871580964,
-   "across": 75.00000005759169
+   "objective": 161.50159206826726,
+   "reliability": 0.995,
+   "quantile": -30.959475187430613,
+   "worst": 14.34006186219139,
+   "across": 74.999999932651
   },
   {
    "name": "P(inside) >= 95%",
-   "objective": 160.71569643810415,
-   "reliability": 0.99875,
-   "quantile": -34.56304781092388,
-   "worst": 7.577215374498536,
-   "across": 75.55960510062495
+   "objective": 160.90968305446484,
+   "reliability": 0.96725,
+   "quantile": -7.0428354095036285,
+   "worst": 46.08720420477721,
+   "across": 95.16523312112996,
+   "compile_seconds": 79.02076128299996,
+   "seconds": 230.58327780999934,
+   "calls": 108
   }
- ]
+ ],
+ "gradient_cost": {
+  "n_design": 27,
+  "evaluation_seconds": 0.5167334929992649,
+  "ad_seconds": 3.8394521859991073,
+  "fd_seconds": 16.10950435400082
+ }
 }

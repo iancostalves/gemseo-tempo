@@ -192,6 +192,38 @@ def test_problem_pages_reference_benchmark_pngs_that_exist(page):
         )
 
 
+SKELETON = (
+    "Problem",
+    "Deterministic optimal control",
+    "Uncertainty propagation",
+    "Optimization under uncertainty",
+    "References",
+)
+"""The sections of a problem page, in order: the problem; what the
+deterministic optimum is and how each method reaches it; what the
+uncertainty does to that optimum, by each way of propagating it; the
+design that accounts for the uncertainty; then the references."""
+
+
+@pytest.mark.parametrize(
+    "page", ["problems/albatross.md", "problems/brachistochrone.md", "problems/sail.md"]
+)
+def test_problem_pages_follow_the_paper_skeleton(page):
+    """A problem page reads as a paper, and can be cited as one.
+
+    Its top-level sections are the skeleton, in order; every displayed
+    equation carries a label, so that the text can refer to it by number;
+    and it cites its sources, which the closing bibliography then lists.
+    """
+    text = (DOCS / page).read_text(encoding="utf-8")
+    headings = tuple(re.findall(r"^## (.+)$", text, flags=re.MULTILINE))
+    assert headings == SKELETON, f"{page} has sections {headings}"
+    unlabelled = re.findall(r"```\{math\}\n(?!:label:)", text)
+    assert not unlabelled, f"{page} has {len(unlabelled)} unlabelled equations"
+    assert "{footcite" in text, f"{page} cites nothing"
+    assert "```{footbibliography}" in text, f"{page} lists no references"
+
+
 def test_every_variable_the_pages_mention_is_declared():
     """A mention of a name no registry has fails the documentation build.
 

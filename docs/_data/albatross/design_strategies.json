@@ -1,0 +1,68 @@
+{
+ "loop_fixed": {
+  "minimum_wind": 10.177831201215445,
+  "feasible": true,
+  "wing": {
+   "wing_area": 0.65,
+   "wing_span": 3.44,
+   "section": 0.5
+  },
+  "aspect_ratio": 18.20553846153846,
+  "glide_ratio": 19.74744849204615
+ },
+ "loop_sequential": {
+  "minimum_wind": 8.87715026882092,
+  "feasible": true,
+  "wing": {
+   "wing_area": 0.5,
+   "wing_span": 3.7,
+   "section": 5.551115123125783e-17
+  },
+  "aspect_ratio": 27.380000000000003,
+  "glide_ratio": 26.0192986635652
+ },
+ "loop_codesign": {
+  "minimum_wind": 8.633239420928728,
+  "feasible": true,
+  "wing": {
+   "wing_area": 0.6185364170305958,
+   "wing_span": 3.7,
+   "section": 4.937199668644996e-14
+  },
+  "aspect_ratio": 22.13289245881674,
+  "glide_ratio": 24.41051855176283
+ },
+ "weave_fixed": {
+  "minimum_wind": 9.85727952184737,
+  "feasible": true,
+  "wing": {
+   "wing_area": 0.65,
+   "wing_span": 3.44,
+   "section": 0.5
+  },
+  "aspect_ratio": 18.20553846153846,
+  "glide_ratio": 19.74744849204615
+ },
+ "weave_sequential": {
+  "minimum_wind": 8.816033985755976,
+  "feasible": true,
+  "wing": {
+   "wing_area": 0.5,
+   "wing_span": 3.7,
+   "section": 5.551115123125783e-17
+  },
+  "aspect_ratio": 27.380000000000003,
+  "glide_ratio": 26.0192986635652
+ },
+ "weave_codesign": {
+  "minimum_wind": 8.337201091958338,
+  "feasible": true,
+  "wing": {
+   "wing_area": 0.6165539035952723,
+   "wing_span": 3.7,
+   "section": 2.591412532788498e-13
+  },
+  "aspect_ratio": 22.20406021301683,
+  "glide_ratio": 24.434039520232293
+ }
+}

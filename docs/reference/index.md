@@ -94,6 +94,7 @@ object is documented once, under the module that defines it.
    gemseo_tempo.problems.brachistochrone.plots
    gemseo_tempo.problems.brachistochrone.problem
    gemseo_tempo.problems.brachistochrone.reference
+   gemseo_tempo.problems.brachistochrone.wire
    gemseo_tempo.problems.sail.model
    gemseo_tempo.problems.sail.plots
    gemseo_tempo.problems.sail.polar

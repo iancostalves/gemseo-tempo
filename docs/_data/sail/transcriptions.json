@@ -1,0 +1,89 @@
+{
+ "reference": 159.4108839616407,
+ "rows": [
+  {
+   "transcription": "shooting",
+   "size": 10,
+   "objective": 159.59742107530587,
+   "met": true,
+   "seconds": 24.042455538,
+   "calls": 48,
+   "error": 0.0011701654807337633
+  },
+  {
+   "transcription": "shooting",
+   "size": 25,
+   "objective": 159.68726814392807,
+   "met": true,
+   "seconds": 114.80943341700001,
+   "calls": 800,
+   "error": 0.0017337848923406351
+  },
+  {
+   "transcription": "shooting",
+   "size": 50,
+   "objective": 159.4108839616407,
+   "met": true,
+   "seconds": 231.82195899699997,
+   "calls": 571,
+   "error": 0.0
+  },
+  {
+   "transcription": "shooting",
+   "size": 100,
+   "objective": 159.55674044573885,
+   "met": false,
+   "seconds": 1083.1800033640002,
+   "calls": 800,
+   "error": 0.0009149719296032781
+  },
+  {
+   "transcription": "collocation",
+   "size": 10,
+   "objective": 161.6368155358196,
+   "met": true,
+   "seconds": 12.167937587999859,
+   "calls": 108,
+   "error": 0.013963485546661485
+  },
+  {
+   "transcription": "collocation",
+   "size": 25,
+   "objective": 161.70761717174796,
+   "met": true,
+   "seconds": 15.868961830999979,
+   "calls": 223,
+   "error": 0.014407631104159206
+  },
+  {
+   "transcription": "collocation",
+   "size": 50,
+   "objective": 161.36530747665938,
+   "met": true,
+   "seconds": 20.61803222200001,
+   "calls": 320,
+   "error": 0.012260289049579395
+  },
+  {
+   "transcription": "collocation",
+   "size": 100,
+   "objective": 162.50409228611903,
+   "met": true,
+   "seconds": 72.58992016700017,
+   "calls": 517,
+   "error": 0.01940399706473398
+  },
+  {
+   "transcription": "indirect",
+   "size": null,
+   "objective": 162.50409228611903,
+   "met": false,
+   "residual": 482.1211710820183,
+   "seed_residual": 482.1211710820183,
+   "unknowns": 3,
+   "seconds": 607.1956183139998,
+   "calls": 20,
+   "error": 0.01940399706473398
+  }
+ ]
+}

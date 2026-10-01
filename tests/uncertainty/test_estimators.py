@@ -30,6 +30,7 @@ from gemseo.algos.parameter_space import ParameterSpace
 from gemseo_tempo.uncertainty.estimators import Comparison
 from gemseo_tempo.uncertainty.estimators import Estimate
 from gemseo_tempo.uncertainty.estimators import Propagation
+from gemseo_tempo.uncertainty.estimators import finite_differences
 from gemseo_tempo.uncertainty.estimators import monte_carlo
 from gemseo_tempo.uncertainty.estimators import polynomial_chaos
 from gemseo_tempo.uncertainty.estimators import taylor
@@ -261,3 +262,16 @@ def test_the_propagation_reports_its_own_moments():
     assert propagation.mean_point.tolist() == [[0.0, 0.0]]
     assert propagation.standard_deviations.tolist() == [1.0, 1.0]
     assert propagation.distribution.getDimension() == 2
+
+
+def test_finite_differences_reproduce_the_exact_gradient_of_a_smooth_response():
+    """On a quadratic, central differences are exact up to rounding."""
+    exact = _propagation(_quadratic, _quadratic_gradient)
+    differenced = finite_differences(exact)
+    points = numpy.array([[0.3, -1.2], [2.0, 0.5]])
+    assert numpy.allclose(
+        differenced.jacobian(points), exact.jacobian(points), atol=1e-6
+    )
+    assert taylor(differenced).standard_deviation == pytest.approx(
+        taylor(exact).standard_deviation, rel=1e-6
+    )

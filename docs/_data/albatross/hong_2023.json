@@ -1,0 +1,69 @@
+{
+ "reference": {
+  "minimum_wind": 6.96,
+  "mass": 8.5,
+  "wing_area": 0.65,
+  "cd0": 0.02,
+  "induced_factor": 0.02,
+  "cl_max": 1.5,
+  "load_factor_max": 3.0,
+  "height_min": 1.5,
+  "bank_max_deg": 70.0
+ },
+ "loop": {
+  "runs": [
+   {
+    "size": 20,
+    "minimum_wind": 7.200216433233011,
+    "feasible": true,
+    "period": 8.47728171146074,
+    "height_max": 26.959002604286667,
+    "height_min": 1.4999999999999964,
+    "airspeed_min": 7.494902964674468,
+    "airspeed_max": 24.194345926719137,
+    "load_factor_max": 2.9999999998564726
+   },
+   {
+    "size": 30,
+    "minimum_wind": 7.185423812152557,
+    "feasible": true,
+    "period": 8.490445095375538,
+    "height_max": 26.996700741709876,
+    "height_min": 1.4999999999992961,
+    "airspeed_min": 7.432524428600892,
+    "airspeed_max": 24.281212770446857,
+    "load_factor_max": 2.9999999973609817
+   }
+  ],
+  "minimum_wind": 7.185423812152557,
+  "difference": 0.03238847875755124
+ },
+ "weave": {
+  "runs": [
+   {
+    "size": 20,
+    "minimum_wind": 6.971556933207822,
+    "feasible": true,
+    "period": 7.925004389766116,
+    "height_max": 23.998132490476454,
+    "height_min": 1.5000000000001477,
+    "airspeed_min": 8.14700202546343,
+    "airspeed_max": 23.101013520748324,
+    "load_factor_max": 2.9999999699040965
+   },
+   {
+    "size": 30,
+    "minimum_wind": 6.953413248342183,
+    "feasible": true,
+    "period": 7.963921760131105,
+    "height_max": 23.97423899120547,
+    "height_min": 1.499999999999976,
+    "airspeed_min": 8.093661665025998,
+    "airspeed_max": 23.14770073354823,
+    "load_factor_max": 2.9999999959363666
+   }
+  ],
+  "minimum_wind": 6.953413248342183,
+  "difference": -0.0009463723646289113
+ }
+}

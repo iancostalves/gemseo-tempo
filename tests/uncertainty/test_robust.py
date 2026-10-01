@@ -243,3 +243,52 @@ def test_the_robust_discipline_reports_the_statistics_as_outputs(frozen):
         assert f"{QUANTITY}.{statistic}" in outputs
     # And it still produces everything the transcription did.
     assert set(scenario.problem.output_names) <= outputs
+
+
+def test_a_statistic_can_be_the_objective(frozen):
+    scenario, names, sample, _ = frozen
+    discipline = robust_discipline(scenario, names, sample[:16], QUANTITY)
+    formulation = OptimalControl(
+        scenario, disciplines=[discipline], objective=f"{QUANTITY}.{MARGIN}"
+    )
+    gemseo_scenario = formulation.create_gemseo_scenario()
+    objective = gemseo_scenario.formulation.optimization_problem.objective
+    assert objective.name == f"{QUANTITY}.{MARGIN}"
+
+
+@pytest.mark.parametrize(
+    "outputs",
+    [
+        [QUANTITY, f"{QUANTITY}.{MARGIN}", f"{QUANTITY}.{RELIABILITY}"],
+        [f"{QUANTITY}.{MARGIN}"],
+    ],
+)
+def test_the_grouped_jacobian_is_the_whole_jacobian(frozen, outputs):
+    """Differentiating group by group changes the cost, not the answer."""
+    import jax
+
+    scenario, names, sample, _ = frozen
+    discipline = robust_discipline(scenario, names, sample[:16], QUANTITY)
+    inputs = list(scenario.problem.design_variables)
+    discipline.add_differentiated_inputs(inputs)
+    discipline.add_differentiated_outputs(outputs)
+    discipline.linearize()
+    # A second time reuses the compiled transforms.
+    discipline._compute_jacobian()
+    grouped = discipline.jac
+
+    data = {name: discipline.io.data[name] for name in discipline.input_grammar.names}
+
+    def whole(differentiated):
+        values = discipline.jax_out_func({**data, **differentiated})
+        return {name: values[name] for name in outputs}
+
+    expected = jax.jacrev(whole)({name: data[name] for name in inputs})
+    for output in outputs:
+        for name in inputs:
+            numpy.testing.assert_allclose(
+                numpy.ravel(grouped[output][name]),
+                numpy.ravel(expected[output][name]),
+                rtol=1e-10,
+                atol=1e-14,
+            )

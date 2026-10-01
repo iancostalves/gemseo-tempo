@@ -1,0 +1,71 @@
+{
+ "reference": 10.073579671860061,
+ "rows": [
+  {
+   "transcription": "shooting",
+   "size": 10,
+   "objective": 10.073579671860061,
+   "met": true,
+   "seconds": 219.0851644230006,
+   "calls": 396,
+   "error": 0.0
+  },
+  {
+   "transcription": "shooting",
+   "size": 20,
+   "objective": 10.378731670808245,
+   "met": true,
+   "seconds": 356.51763328000015,
+   "calls": 500,
+   "error": 0.030292310071325188
+  },
+  {
+   "transcription": "shooting",
+   "size": 40,
+   "objective": 10.507826591409367,
+   "met": true,
+   "seconds": 612.2525629979991,
+   "calls": 500,
+   "error": 0.04310750832321787
+  },
+  {
+   "transcription": "collocation",
+   "size": 10,
+   "objective": 10.326585231207995,
+   "met": true,
+   "seconds": 5.674859505999848,
+   "calls": 48,
+   "error": 0.025115755033405754
+  },
+  {
+   "transcription": "collocation",
+   "size": 20,
+   "objective": 10.177831201215445,
+   "met": true,
+   "seconds": 9.339895969000281,
+   "calls": 53,
+   "error": 0.010349005294176055
+  },
+  {
+   "transcription": "collocation",
+   "size": 40,
+   "objective": 10.171163179786326,
+   "met": true,
+   "seconds": 16.78321734900055,
+   "calls": 56,
+   "error": 0.009687073622781628
+  },
+  {
+   "transcription": "indirect",
+   "size": null,
+   "objective": 10.171042237973671,
+   "met": false,
+   "residual": 3.3429841720496256,
+   "seed_residual": 7.850639569670404,
+   "unknowns": 124,
+   "seconds": 637.4409371169986,
+   "calls": 10,
+   "error": 0.009675067780112496
+  }
+ ]
+}

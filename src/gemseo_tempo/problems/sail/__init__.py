@@ -27,6 +27,7 @@ from gemseo_tempo.problems.sail.polar import boat_speed
 from gemseo_tempo.problems.sail.polar import downwind_vmg
 from gemseo_tempo.problems.sail.polar import plot_polar
 from gemseo_tempo.problems.sail.polar import speed_shape
+from gemseo_tempo.problems.sail.problem import CORRIDOR_HALF_WIDTH
 from gemseo_tempo.problems.sail.problem import LEGS
 from gemseo_tempo.problems.sail.problem import Guess
 from gemseo_tempo.problems.sail.problem import create_optimization
@@ -39,6 +40,7 @@ from gemseo_tempo.problems.sail.wind import WindField
 from gemseo_tempo.problems.sail.wind import create_wind
 
 __all__ = [
+    "CORRIDOR_HALF_WIDTH",
     "LEGS",
     "NO_GO_ANGLE",
     "REGISTRY",

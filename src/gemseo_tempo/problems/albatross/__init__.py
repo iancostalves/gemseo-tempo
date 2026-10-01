@@ -24,14 +24,18 @@ from gemseo_tempo.problems.albatross.model import wind_gradient
 from gemseo_tempo.problems.albatross.model import wind_speed
 from gemseo_tempo.problems.albatross.plots import energy_budget
 from gemseo_tempo.problems.albatross.plots import plot_controls
-from gemseo_tempo.problems.albatross.plots import plot_cycle_schematic
+from gemseo_tempo.problems.albatross.plots import plot_cycle_shapes
 from gemseo_tempo.problems.albatross.plots import plot_energy
 from gemseo_tempo.problems.albatross.plots import plot_energy_analysis
+from gemseo_tempo.problems.albatross.plots import plot_frames
+from gemseo_tempo.problems.albatross.plots import plot_maneuver_pattern
 from gemseo_tempo.problems.albatross.plots import plot_pareto
 from gemseo_tempo.problems.albatross.plots import plot_polar
+from gemseo_tempo.problems.albatross.plots import plot_scenario
 from gemseo_tempo.problems.albatross.plots import plot_section_trade
 from gemseo_tempo.problems.albatross.plots import plot_trajectory
 from gemseo_tempo.problems.albatross.plots import plot_wind_profile
+from gemseo_tempo.problems.albatross.plots import schematic_cycle
 from gemseo_tempo.problems.albatross.problem import NOMINAL_WIND
 from gemseo_tempo.problems.albatross.problem import REGISTRY
 from gemseo_tempo.problems.albatross.problem import TURN
@@ -74,14 +78,18 @@ __all__ = [
     "gliding_baseline",
     "optimal_trajectory",
     "plot_controls",
-    "plot_cycle_schematic",
+    "plot_cycle_shapes",
     "plot_energy",
     "plot_energy_analysis",
+    "plot_frames",
+    "plot_maneuver_pattern",
     "plot_pareto",
     "plot_polar",
+    "plot_scenario",
     "plot_section_trade",
     "plot_wind_profile",
     "plot_trajectory",
+    "schematic_cycle",
     "soaring_cycle",
     "solve_pareto_front",
     "wind_gradient",

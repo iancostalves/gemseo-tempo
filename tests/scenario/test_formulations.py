@@ -116,6 +116,30 @@ def test_design_space_explicit_bounds_win():
     assert numpy.all(design_space.get_lower_bounds() == -5.0)
 
 
+def test_design_space_starts_a_stray_default_on_its_bound():
+    """An initial guess outside the box starts on the box, not in an error.
+
+    The default control is 0.2 everywhere, below the lower bound here.
+    """
+    formulation = OptimalControl(
+        make_min_energy_scenario(), bounds={"control.u": (0.25, 0.5)}
+    )
+    design_space = formulation.create_design_space()
+    value = design_space.get_current_value(as_dict=True)["control.u"]
+    assert numpy.allclose(value, 0.25)
+
+
+def test_a_costate_does_not_inherit_the_bounds_of_its_state():
+    """costate.u would otherwise read the registry entry of u."""
+    registry = VariableRegistry(
+        [Variable(name="u", full_name="Control", lower_bound=0.0, upper_bound=2.0)]
+    )
+    formulation = OptimalControl(make_min_energy_scenario(registry))
+    assert formulation._bounds_of("costate.u") == (-numpy.inf, numpy.inf)
+    assert formulation._bounds_of("multiplier.u") == (-numpy.inf, numpy.inf)
+    assert formulation._bounds_of("control.u") == (0.0, 2.0)
+
+
 def test_design_space_unbounded_without_registry():
     formulation = OptimalControl(make_min_energy_scenario())
     design_space = formulation.create_design_space()

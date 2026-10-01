@@ -65,6 +65,10 @@ class DynamicScenario:
     state_space: StateSpace
     """The dynamics model, kept so a solved trajectory can be read back."""
 
+    definition: dict
+    """Everything the problem was built from, bar the transcription, so it
+    can be built again under another one; see :meth:`retranscribe`."""
+
     def __init__(
         self,
         state_space: StateSpace,
@@ -133,6 +137,21 @@ class DynamicScenario:
         """
         if assembly not in (self.MONOLITHIC, self.SPLIT):
             raise ValueError(f"Unknown assembly {assembly!r}.")
+        self.definition = {
+            "state_space": state_space,
+            "integrator": integrator,
+            "controls": tuple(controls),
+            "functionals": tuple(functionals),
+            "constraints": tuple(constraints),
+            "boundary": boundary,
+            "statics": statics,
+            "assembly": assembly,
+            "registry": registry,
+            "constants": dict(constants or {}),
+            "differentiation_method": differentiation_method,
+            "t0": t0,
+            "t1": t1,
+        }
         self.assembly = assembly
         self.registry = registry
         self.state_space = state_space
@@ -158,6 +177,26 @@ class DynamicScenario:
             self.disciplines = [self._build_monolithic()]
         else:
             self.disciplines = self._build_split()
+
+    def retranscribe(self, transcription, **changes) -> DynamicScenario:
+        """Return the same problem under another transcription.
+
+        Parameters
+        ----------
+        transcription
+            The transcription to build the problem with.
+        **changes
+            Any part of :attr:`definition` to replace, such as the
+            boundary or the constants a warm start comes with.
+
+        Returns
+        -------
+        DynamicScenario
+            The new scenario.
+        """
+        return DynamicScenario(
+            **{**self.definition, "transcription": transcription, **changes}
+        )
 
     def _build_monolithic(self) -> JAXDiscipline:
         """Build the single differentiated discipline.
