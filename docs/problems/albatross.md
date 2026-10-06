@@ -149,6 +149,22 @@ twenty Hermite–Simpson segments, gives the optimizer:
 
 ## Deterministic optimal control
 
+:::{admonition} Takeaway: the deterministic problem
+:class: tip
+
+- **Transcription:** collocation, which converges in about fifty iterations
+  and seconds. Single shooting is slow and badly conditioned over nine
+  seconds of unstable flight, and indirect shooting fails on the active
+  path constraints.
+- **Discretization:** twenty to forty segments, from several starts for the
+  shapes, and co-design started from the sequential wing.
+- **Differentiation:** under shooting, forward mode through the dynamics, the
+  stage that sets the cost: exact, lean in memory and flat in the number of
+  constraints. Finite differences batched into one call cost the same, with
+  six digits rather than fifteen. Reverse mode through the checkpointing
+  adjoint is faster with many controls but not exact here.
+:::
+
 ### Variants
 
 One method throughout: collocation on twenty segments, solved by SLSQP from
@@ -273,7 +289,109 @@ rate at which it gains energy:
    :include-source: false
 ```
 
+### Differentiation
+
+The energy cycle by single shooting, its Jacobian four ways: by finite
+differences; by forward mode; and by reverse mode, once through the Direct
+adjoint and once through the checkpointing one, the library's default. The
+lift limit, the load limit and the height floor are checked at every save
+point, so the outputs grow with the save grid and the inputs with the
+control intervals; each is swept with the other held, compiled (solid) and
+not (dashed).
+
+Each method is measured at its best. Finite differences are forward
+differences at the step, from 10⁻⁴ to 10⁻⁹, that comes closest to the
+exact Jacobian, timed both batched into one vectorized call and one
+evaluation at a time, the faster counting. Compilation is paid once per
+program, and is charged separately, below:
+
+```{eval-rst}
+.. plot:: _ext/gallery/albatross_mode_sweep.py
+   :include-source: false
+```
+
+Against {docvalue}`albatross/differentiation.json:inputs.0.n_outputs:d` outputs, forward mode and
+batched finite differences run neck and neck at every size, as on the sail:
+{docvalue}`albatross/differentiation.json:inputs.26.seconds:.1f` s and
+{docvalue}`albatross/differentiation.json:inputs.25.seconds:.1f` s at
+{docvalue}`albatross/differentiation.json:inputs.26.n_inputs:d` inputs. Checkpointed reverse mode
+overtakes both from {docvalue}`albatross/differentiation.json:inputs.24.n_inputs:d` inputs, to
+{docvalue}`albatross/differentiation.json:inputs.28.seconds:.1f` s at the largest, the crossover the
+theory predicts. It is not a crossover to take, though: on these save grids
+the checkpointed reverse pass is wrong by
+{docvalue}`albatross/differentiation.json:inputs.3.error:.0%` to {docvalue}`albatross/differentiation.json:outputs.10.error:.0%`,
+where the exact modes agree to rounding and finite differences to six
+digits. Exact reverse mode, through the Direct adjoint, only draws level
+with forward mode on the largest grid, and its memory grows to
+{docvalue}`albatross/differentiation.json:outputs.20.memory:.0f*1e-6` MB as the outputs do. As the
+outputs grow at fixed inputs, forward mode and finite differences stay flat
+while both reverse modes grow with every row. The batched methods grow
+faster than the inputs, since every evaluation itself slows as the control
+grid refines. Compiling:
+
+```{eval-rst}
+.. plot:: _ext/gallery/albatross_compile_times.py
+   :include-source: false
+```
+
+At twenty intervals, each method on the four costs, the best at the rim:
+
+```{eval-rst}
+.. plot:: _ext/gallery/albatross_mode_radar.py
+   :include-source: false
+```
+
+| method | compilation | one Jacobian | error | memory |
+| --- | --- | --- | --- | --- |
+| finite differences | {docvalue}`albatross/differentiation.json:inputs.14.compile_jacobian:.1f` s | {docvalue}`albatross/differentiation.json:inputs.14.seconds:.2f` s | {docvalue}`albatross/differentiation.json:inputs.14.error:.0e` | {docvalue}`albatross/differentiation.json:inputs.14.memory:.0f*0.001` kB |
+| forward | {docvalue}`albatross/differentiation.json:inputs.15.compile_jacobian:.1f` s | {docvalue}`albatross/differentiation.json:inputs.15.seconds:.2f` s | {docvalue}`albatross/differentiation.json:inputs.15.error:.0e` | {docvalue}`albatross/differentiation.json:inputs.15.memory:.0f*0.001` kB |
+| reverse | {docvalue}`albatross/differentiation.json:inputs.16.compile_jacobian:.1f` s | {docvalue}`albatross/differentiation.json:inputs.16.seconds:.2f` s | {docvalue}`albatross/differentiation.json:inputs.16.error:.0e` | {docvalue}`albatross/differentiation.json:inputs.16.memory:.0f*0.001` kB |
+| reverse, checkpointed | {docvalue}`albatross/differentiation.json:inputs.17.compile_jacobian:.1f` s | {docvalue}`albatross/differentiation.json:inputs.17.seconds:.2f` s | {docvalue}`albatross/differentiation.json:inputs.17.error:.0e` | {docvalue}`albatross/differentiation.json:inputs.17.memory:.0f*0.001` kB |
+
+**A mode per stage.** With the split assembly, the cycle is a chain of
+three stages, each with its own shape: the statics turn the wing into
+aerodynamic constants, a {docvalue}`albatross/chain_modes.json:chains.0.statics_shape.0:d` by
+{docvalue}`albatross/chain_modes.json:chains.0.statics_shape.1:d` Jacobian; the dynamics fly the cycle,
+{docvalue}`albatross/chain_modes.json:chains.0.dynamics_shape.0:d` trajectory values from
+{docvalue}`albatross/chain_modes.json:chains.0.dynamics_shape.1:d` controls and constants; and the outputs
+read {docvalue}`albatross/chain_modes.json:chains.0.outputs_shape.1:d` of those into
+{docvalue}`albatross/chain_modes.json:chains.0.outputs_shape.0:d` constraints. Each stage differentiated in
+either mode, all eight combinations, the chain Jacobian their product,
+labelled statics · dynamics · outputs:
+
+```{eval-rst}
+.. plot:: _ext/gallery/albatross_chain_modes.py
+   :include-source: false
+```
+
+Every combination gives the same Jacobian, to
+{docvalue}`albatross/chain_modes.json:chains.2.error:.0e`. The one choice that matters is the dynamics':
+forward, {docvalue}`albatross/chain_modes.json:chains.0.dynamics_seconds:.1f` s and
+{docvalue}`albatross/chain_modes.json:chains.0.dynamics_memory:.0f*0.001` kB, against
+{docvalue}`albatross/chain_modes.json:chains.2.dynamics_seconds:.1f` s and
+{docvalue}`albatross/chain_modes.json:chains.2.dynamics_memory:.1f*1e-6` MB in reverse, since it has seven
+times more outputs than inputs. The statics and the outputs cost a
+millisecond or less either way, so their mode is free, whatever the
+reverse-for-the-design intuition suggests. The rule of inputs against
+outputs applies stage by stage, not to the chain as a whole. Finite
+differences of the whole chain, batched into one call, take
+{docvalue}`albatross/chain_modes.json:fd.seconds:.1f` s, as long as the forward chains,
+for six digits rather than fifteen.
+
 ## Uncertainty propagation
+
+:::{admonition} Takeaway: uncertainty propagation
+:class: tip
+
+- **Transcription:** single shooting, so that the frozen cycle responds to
+  the wind, started from a forty-segment collocation optimum. From the
+  default guess, or from twenty segments, shooting does not converge.
+- **Sampling:** vectorized with `vmap`.
+- **Estimator:** first-order Taylor, two model calls.
+- **Differentiation:** finite differences, batched into one call: with two
+  uncertain inputs they serve as well as exact derivatives, and are the
+  quicker.
+:::
 
 The wind at 10 m is forecast at 22 m/s and known to 10%, and the roughness
 of the sea, which sets how fast the wind grows with height, is log-normal
@@ -284,8 +402,9 @@ with an energy height of {docvalue}`albatross/propagation.json:objective:.1f*-1`
 forecast and {docvalue}`albatross/propagation.json:reference.mean:.1f` ±
 {docvalue}`albatross/propagation.json:reference.standard_deviation:.1f` m over the uncertainty.
 Each way of estimating that, against 20 000 draws, where AD marks exact
-derivatives by reverse-mode automatic differentiation and FD finite
-differences:
+derivatives by reverse-mode automatic differentiation and FD central
+differences, every perturbed point in the same vectorized call, at the
+step closest to the exact derivative at the mean:
 
 | method | error, mean | error, deviation | model calls | time |
 | --- | --- | --- | --- | --- |
@@ -312,6 +431,21 @@ to the cycle's controls, which the next section needs.
 
 ## Optimization under uncertainty
 
+:::{admonition} Takeaway: optimization under uncertainty
+:class: tip
+
+- **Formulation:** the mean less twice the deviation of the energy,
+  started from the deterministic cycle.
+- **Sampling:** one fixed sample of
+  {docvalue}`albatross/robust.json:design_sample:d` draws, checked on
+  {docvalue}`albatross/robust.json:check_sample:d` fresh ones.
+- **Differentiation:** automatic, with the Jacobian taken group by group:
+  the constraints on the forecast flight in forward mode, the statistic
+  through the sample in reverse mode, both through the Direct adjoint. One
+  gradient costs a seventh of what finite differences do, even batched
+  into one call.
+:::
+
 The robust cycle maximizes the mean energy less twice its deviation over
 {docvalue}`albatross/robust.json:design_sample:d` draws of the wind and the sea, starting
 from the deterministic one. Both, flown on
@@ -331,16 +465,21 @@ mean and deviation of {docvalue}`albatross/robust.json:design_sample:d` nine-sec
 with respect to all {docvalue}`albatross/robust.json:gradient_cost.n_design:d` controls:
 one gradient takes {docvalue}`albatross/robust.json:gradient_cost.ad_seconds:.1f` s by AD,
 one reverse pass through the whole batch, against
-{docvalue}`albatross/robust.json:gradient_cost.fd_seconds:.1f` s by finite differences, one
-more batch per control. With AD the robust solve ran its
-{docvalue}`albatross/robust.json:designs.robust.calls:d` iterations, its budget, in
-{docvalue}`albatross/robust.json:designs.robust.seconds:.0f*0.016666666666666666` min.
-Which outputs the reverse passes start from matters as much:
+{docvalue}`albatross/robust.json:gradient_cost.fd_seconds:.1f` s by finite differences, even
+with every perturbed cycle flown in the same vectorized call. With AD the
+robust solve ran its {docvalue}`albatross/robust.json:designs.robust.calls:d` iterations, its
+budget, in {docvalue}`albatross/robust.json:designs.robust.seconds:.0f*0.016666666666666666` min.
+How the Jacobian is split matters as much:
 {class}`~gemseo_tempo.uncertainty.robust.GroupedJAXDiscipline`
 differentiates the cycle's three hundred constraint rows on the forecast
-flight alone, and only the statistics through the sample. Taken together,
-every constraint row would be back-propagated through all
-{docvalue}`albatross/robust.json:design_sample:d` flights.
+flight alone, in forward mode, eighty-two tangents rather than three
+hundred cotangents, and only the statistic through the sample, in reverse
+mode. Taken together, every constraint row would be back-propagated through
+all {docvalue}`albatross/robust.json:design_sample:d` flights. One integrator serves both
+groups, and the Direct adjoint is the better one for the pair: it lets the
+constraints go forward, at a quarter of what reverse mode costs them, and
+costs the statistic half as much again as the checkpointing adjoint would.
+
 
 ## References
 

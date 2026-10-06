@@ -79,6 +79,21 @@ problem the optimizer sees is:
 
 ## Deterministic optimal control
 
+:::{admonition} Takeaway: the deterministic problem
+:class: tip
+
+- **Transcription:** single shooting. Collocation settles in a narrower,
+  slower gybe, and indirect shooting cannot represent the gybe at all.
+- **Discretization:** twenty-five to fifty control intervals; the upwind leg
+  from more than one start, since the polar's guess leads to a slow local
+  optimum.
+- **Differentiation:** forward mode through the Direct adjoint, compiled,
+  or finite differences batched into one call: the two run neck and neck
+  at every size, forward with exact derivatives, differences with six or
+  seven digits. Reverse mode is the slowest and the heaviest, and the
+  checkpointing adjoint is not exact here.
+:::
+
 ### Variants
 
 One method throughout: single shooting on 25 intervals, solved by SLSQP
@@ -163,7 +178,77 @@ single gybe all the way and misses the mark by hundreds of metres. Started
 from the finest collocation solution, the residual of the necessary
 conditions stays at {docvalue}`sail/transcriptions.json:rows.8.residual:.0f`.
 
+### Differentiation
+
+The downwind leg by single shooting, its Jacobian three ways: by finite
+differences, by forward mode and by reverse mode, both modes through the
+Direct adjoint the sail always needs. The channel is checked at every save
+point, so the outputs grow with the save grid while the inputs grow with
+the control intervals; each is swept with the other held, compiled (solid)
+and not (dashed).
+
+Each method is measured at its best. Finite differences are forward
+differences at the step, from 10⁻⁴ to 10⁻⁹, that comes closest to the
+exact Jacobian, timed both batched into one vectorized call and one
+evaluation at a time, the faster counting. Compilation is paid once per
+program, and is charged separately, below:
+
+```{eval-rst}
+.. plot:: _ext/gallery/sail_mode_sweep.py
+   :include-source: false
+```
+
+Forward mode and batched finite differences run neck and neck at every
+size, each a few percent ahead at some sizes and behind at others: at
+{docvalue}`sail/differentiation.json:inputs.27.n_inputs:d` inputs,
+{docvalue}`sail/differentiation.json:inputs.28.seconds:.1f` s by forward mode against
+{docvalue}`sail/differentiation.json:inputs.27.seconds:.1f` s by differences. Both push every input
+direction through the solve in one batch, and neither stores it. Reverse
+mode through the Direct adjoint does, to sweep back through it: it is the
+slowest at every size, {docvalue}`sail/differentiation.json:inputs.29.seconds:.1f` s at the largest,
+and its memory grows with the solve, to
+{docvalue}`sail/differentiation.json:inputs.29.memory:.0f*1e-6` MB against
+{docvalue}`sail/differentiation.json:inputs.28.memory:.1f*1e-6` MB. As the outputs grow at fixed
+inputs, forward mode and finite differences stay flat, their cost set by
+the inputs alone, while reverse mode grows with every output, to
+{docvalue}`sail/differentiation.json:outputs.20.seconds:.1f` s at
+{docvalue}`sail/differentiation.json:outputs.20.n_outputs:d` outputs. Compiling the reverse program
+takes longer than the forward one, up to five times as long, and the
+batched differences compile fastest of all:
+
+```{eval-rst}
+.. plot:: _ext/gallery/sail_compile_times.py
+   :include-source: false
+```
+
+At twenty-five intervals, each method on the four costs, the best at the
+rim:
+
+```{eval-rst}
+.. plot:: _ext/gallery/sail_mode_radar.py
+   :include-source: false
+```
+
+| method | compilation | one Jacobian | error | memory |
+| --- | --- | --- | --- | --- |
+| finite differences | {docvalue}`sail/differentiation.json:inputs.12.compile_jacobian:.1f` s | {docvalue}`sail/differentiation.json:inputs.12.seconds:.3f` s | {docvalue}`sail/differentiation.json:inputs.12.error:.0e` | {docvalue}`sail/differentiation.json:inputs.12.memory:.0f*0.001` kB |
+| forward | {docvalue}`sail/differentiation.json:inputs.13.compile_jacobian:.1f` s | {docvalue}`sail/differentiation.json:inputs.13.seconds:.3f` s | {docvalue}`sail/differentiation.json:inputs.13.error:.0e` | {docvalue}`sail/differentiation.json:inputs.13.memory:.0f*0.001` kB |
+| reverse | {docvalue}`sail/differentiation.json:inputs.14.compile_jacobian:.1f` s | {docvalue}`sail/differentiation.json:inputs.14.seconds:.3f` s | {docvalue}`sail/differentiation.json:inputs.14.error:.0e` | {docvalue}`sail/differentiation.json:inputs.14.memory:.0f*0.001` kB |
+
 ## Uncertainty propagation
+
+:::{admonition} Takeaway: uncertainty propagation
+:class: tip
+
+- **Sampling:** vectorized with `vmap`: the largest saving of all, a
+  hundredfold on the same draws.
+- **Estimator:** first-order Taylor, two model calls, for the spread;
+  gradient-enhanced chaos when the mean is wanted to a thousandth of a
+  deviation.
+- **Differentiation:** finite differences, batched into one call: with two
+  uncertain inputs they are quicker than the reverse passes, and give the
+  same answer.
+:::
 
 The wind on the day is not the forecast one: its strength
 {var}`wind_scale <symbol>` is known to 12% and its direction
@@ -175,7 +260,9 @@ past the mark by
 deviation either way. Single shooting is used here, so that a frozen heading
 schedule responds to the wind. Each way of estimating that spread, against
 20 000 draws, where AD marks exact derivatives by reverse-mode automatic
-differentiation and FD finite differences:
+differentiation and FD central
+differences, every perturbed point in the same vectorized call, at the
+step closest to the exact derivative at the mean:
 
 | method | error, mean | error, deviation | model calls | time |
 | --- | --- | --- | --- | --- |
@@ -193,13 +280,29 @@ one evaluation and one gradient, already matches 20 000 draws to a hundredth
 of a deviation; second order adds a little curvature to the mean and nothing
 useful. Gradient-enhanced chaos is the most accurate of all, and it needs the
 gradient at each of its twelve points: twelve reverse passes by AD, or 48
-more evaluations by FD, for the same answer. The largest saving is
+more evaluations by FD, for the same answer, and with two inputs the
+differences, all in one vectorized call, are the quicker. The largest
+saving is
 vectorization: the 256 draws take
 {docvalue}`sail/propagation.json:estimates.sampling_vmapped.seconds:.2f` s in
 one `vmap` dispatch, against
 {docvalue}`sail/propagation.json:estimates.sampling_looped.seconds:.0f` s in a loop.
 
 ## Optimization under uncertainty
+
+:::{admonition} Takeaway: optimization under uncertainty
+:class: tip
+
+- **Formulation:** a chance constraint, P(inside) ≥ 95%, solved once,
+  rather than a safety margin found by trial and error.
+- **Sampling:** one fixed sample of {docvalue}`sail/margin.json:design_sample:d`
+  draws, the probability smoothed so that it has a gradient, and the design
+  checked on 4000 fresh ones.
+- **Differentiation:** automatic, in the loop: one gradient of the
+  probability with respect to every heading costs a reverse pass through the
+  batch, a quarter of what finite differences cost even batched into one
+  call.
+:::
 
 With the race area narrowed to
 {docvalue}`sail/margin.json:half_width:.0f` m either side, the downwind leg's optimum
@@ -228,10 +331,14 @@ Its gradient is a derivative of a probability, with respect to all
 {docvalue}`sail/margin.json:gradient_cost.n_design:d` design variables, through
 {docvalue}`sail/margin.json:design_sample:d` sailed legs. By AD that is one reverse
 pass through the batch, {docvalue}`sail/margin.json:gradient_cost.ad_seconds:.1f` s,
-against {docvalue}`sail/margin.json:gradient_cost.fd_seconds:.1f` s by finite
-differences, one more batch per variable. The solve took
-{docvalue}`sail/margin.json:designs.4.calls:d` iterations,
-{docvalue}`sail/margin.json:designs.4.seconds:.0f*0.016666666666666666` min.
+against {docvalue}`sail/margin.json:gradient_cost.fd_seconds:.1f` s by finite differences
+even with every perturbed design sailed in the same vectorized call. The
+trajectory's own rows, the channel at every save point, are taken
+separately in forward mode, which the differentiation study above found
+the faster on the sail. The solve took {docvalue}`sail/margin.json:designs.4.calls:d` iterations,
+{docvalue}`sail/margin.json:designs.4.seconds:.0f` s after
+{docvalue}`sail/margin.json:designs.4.compile_seconds:.0f` s of compilation.
+
 
 ## References
 

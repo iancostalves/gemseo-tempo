@@ -793,7 +793,8 @@ def _generate_sail_margin(size: int, smoke: bool) -> None:
             smoothing=8.0,
             target=target,
         )
-        cost = _gradient_cost(function, point)
+        # The sail integrates through the Direct adjoint only.
+        cost = _gradient_cost({"Direct": function}, point)
     else:
         cost = None
 
@@ -899,7 +900,8 @@ def _propagation_study(
     speedup = measure_speedup(scenario, names, [quantity], sample)
 
     exact = from_scenario(scenario, registry, names, quantity)
-    differenced = finite_differences(exact)
+    fd_step = _propagation_step(exact)
+    differenced = finite_differences(exact, relative_step=fd_step)
     looped = looped_evaluator(scenario, names, [quantity])
     size = 64 if smoke else 256
     reference = monte_carlo(
@@ -944,6 +946,7 @@ def _propagation_study(
         "names": list(names),
         "objective": objective,
         "feasible": feasible,
+        "fd_step": fd_step,
         "speedup": {
             "n_samples": speedup.n_samples,
             "looped_seconds": speedup.looped_seconds,
@@ -955,6 +958,38 @@ def _propagation_study(
     }
     _write_json(f"{name}/propagation.json", study)
     return study
+
+
+def _propagation_step(propagation, steps=(1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7)):
+    """Return the finite-difference step closest to the exact derivative.
+
+    Measured at the mean, against the derivative automatic differentiation
+    gives there, so that the differenced estimators are compared at their
+    best rather than at an arbitrary step.
+
+    Parameters
+    ----------
+    propagation
+        The propagation with exact derivatives.
+    steps
+        The steps tried, as fractions of each standard deviation.
+
+    Returns
+    -------
+    float
+        The step whose central differences come closest.
+    """
+    from gemseo_tempo.uncertainty.estimators import finite_differences
+
+    mean = propagation.mean_point
+    exact = numpy.asarray(propagation.jacobian(mean))
+    scale = max(float(numpy.abs(exact).max()), numpy.finfo(float).tiny)
+
+    def error(step):
+        differenced = finite_differences(propagation, relative_step=step)
+        return float(numpy.abs(differenced.jacobian(mean) - exact).max()) / scale
+
+    return min(steps, key=error)
 
 
 def _statistic_of_design(scenario, names, sample, quantity, statistic, **settings):
@@ -1001,18 +1036,26 @@ def _statistic_of_design(scenario, names, sample, quantity, statistic, **setting
     return function, point
 
 
-def _gradient_cost(function, point, repeats: int = 5) -> dict:
-    """Time one gradient by reverse-mode AD and by forward differences.
+def _gradient_cost(functions, point, repeats: int = 5) -> dict:
+    """Time one gradient by AD and by finite differences, each at its best.
 
     Measured on the bare JAX function, compiled first, since GEMSEO caches
     a linearization until its inputs change and timing it twice at one
-    point would time the cache. Forward differences are what GEMSEO falls
-    back on: one more evaluation per design variable.
+    point would time the cache. Automatic differentiation is timed in
+    reverse mode, one pass for one output, through every adjoint given,
+    the fastest counting; all of them are exact for a scalar. Forward mode
+    is left out: it takes one pass per input, and on the albatross's
+    margin, eighty-two inputs through sixty-four draws, it had not
+    finished compiling and running once in twenty-five minutes.
+    Finite differences take the step that comes closest to that exact
+    gradient and are timed batched into one vectorized call and one
+    evaluation at a time, the faster counting.
 
     Parameters
     ----------
-    function
-        The scalar function of a flat vector.
+    functions
+        The scalar function of a flat vector, by the adjoint its
+        integration is differentiated through.
     point
         Where to differentiate it.
     repeats
@@ -1021,35 +1064,49 @@ def _gradient_cost(function, point, repeats: int = 5) -> dict:
     Returns
     -------
     dict
-        The design size and the seconds of one evaluation, one AD
-        gradient and one finite-difference gradient.
+        The design size, the seconds of one evaluation and of one gradient
+        by each route, and the configuration each route was fastest in.
     """
     import jax
 
+    from gemseo_tempo.benchmarking.differentiation import _differences
+    from gemseo_tempo.benchmarking.differentiation import _fastest
+    from gemseo_tempo.benchmarking.differentiation import batched_differences
+    from gemseo_tempo.benchmarking.differentiation import best_step
+
+    routes = {
+        f"reverse, {adjoint}": jax.jit(jax.grad(function))
+        for adjoint, function in functions.items()
+    }
+    timings = {}
+    for name, route in routes.items():
+        route(point).block_until_ready()
+        timings[name] = _fastest(lambda route=route: route(point), repeats)
+    ad = min(timings, key=timings.get)
+    exact = numpy.asarray(routes[ad](point))[None, :]
+
+    function = functions.get("Direct", next(iter(functions.values())))
     value = jax.jit(function)
-    gradient = jax.jit(jax.grad(function))
-    steps = 1e-6 * jnp.maximum(1.0, jnp.abs(point))
-    shifted = [point.at[index].add(steps[index]) for index in range(point.size)]
+    batched = jax.jit(batched_differences(lambda x: jnp.atleast_1d(function(x))))
+    step, _ = best_step(batched, point, exact)
     value(point).block_until_ready()
-    gradient(point).block_until_ready()
-
-    def fastest(call):
-        best = numpy.inf
-        for _ in range(repeats):
-            started = time.perf_counter()
-            call()
-            best = min(best, time.perf_counter() - started)
-        return best
-
-    def differences():
-        base = value(point)
-        return [(value(row) - base) for row in shifted][-1].block_until_ready()
-
+    batched(point, step).block_until_ready()
+    fd = {
+        "batched": _fastest(lambda: batched(point, step), repeats),
+        "sequential": _fastest(
+            lambda: _differences(lambda x: jnp.atleast_1d(value(x)), point, step),
+            repeats,
+        ),
+    }
+    variant = min(fd, key=fd.get)
     return {
         "n_design": int(point.size),
-        "evaluation_seconds": fastest(lambda: value(point).block_until_ready()),
-        "ad_seconds": fastest(lambda: gradient(point).block_until_ready()),
-        "fd_seconds": fastest(differences),
+        "evaluation_seconds": _fastest(lambda: value(point), repeats),
+        "ad_seconds": timings[ad],
+        "ad_route": ad,
+        "fd_seconds": fd[variant],
+        "fd_variant": variant,
+        "fd_step": step,
     }
 
 
@@ -1154,16 +1211,20 @@ def _generate_wire_uncertainty(smoke: bool) -> None:
     Three wires are compared on a sample none of them was designed on: the
     cycloid, designed for the ideal bead; the wire designed for the mean
     physics; and the wire minimizing the mean plus twice the deviation of
-    the descent time over a fixed sample. The last is solved twice, with
-    exact gradients and with GEMSEO's finite differences, from the same
-    start, and the cost of one gradient of that objective is measured as
-    the wire is refined.
+    the descent time over a fixed sample. The last is solved twice from the
+    same start, each derivative at its best: exact, in the cheaper mode of
+    each output group, through the checkpointed adjoint, which is exact on
+    this problem and the fastest measured on it; and by forward differences
+    batched into one vectorized call, at the step that comes closest to the
+    exact gradient there. The cost of one gradient of that objective is
+    measured as the wire is refined.
 
     Parameters
     ----------
     smoke
         Whether to run the tiny version, for the tests.
     """
+    from gemseo_tempo.dynamics.integrators import DiffraxIntegrator
     from gemseo_tempo.problems.brachistochrone import REGISTRY
     from gemseo_tempo.problems.brachistochrone import create_wire_optimization
     from gemseo_tempo.problems.brachistochrone import create_wire_scenario
@@ -1209,50 +1270,66 @@ def _generate_wire_uncertainty(smoke: bool) -> None:
             "calls": len(gemseo_scenario.formulation.optimization_problem.database),
             **spread(design),
         }
-    for label, method in (("robust", None), ("robust_fd", "finite_differences")):
+    costs = []
+    for count in (10, 20) if smoke else (10, 20, 40, 80):
+        functions = {}
+        for adjoint in ("Direct", "RecursiveCheckpoint"):
+            functions[adjoint], point = _statistic_of_design(
+                create_wire_scenario(
+                    size=count,
+                    constants=nominal,
+                    integrator=DiffraxIntegrator(
+                        dt0=1.0 / 400, n_save=count + 1, adjoint=adjoint
+                    ),
+                ),
+                names,
+                design_sample,
+                DESCENT_TIME,
+                MARGIN,
+                factor=factor,
+            )
+        costs.append({"size": count, **_gradient_cost(functions, point)})
+    # Measured at the start of the robust solve, on its own discretization.
+    fd_step = next(cost["fd_step"] for cost in costs if cost["size"] == size)
+
+    for label, modes in (("robust", ("auto", "auto")), ("robust_fd", ("fd", "fd"))):
         scenario = create_wire_scenario(size=size, constants=nominal)
         formulation = OptimalControl(
             scenario,
             bounds=wire_bounds(scenario),
             disciplines=[
                 robust_discipline(
-                    scenario, names, design_sample, DESCENT_TIME, factor=factor
+                    scenario,
+                    names,
+                    design_sample,
+                    DESCENT_TIME,
+                    factor=factor,
+                    modes=modes,
+                    fd_step=fd_step,
                 )
             ],
             objective=f"{DESCENT_TIME}.{MARGIN}",
         )
         gemseo_scenario = formulation.create_gemseo_scenario()
-        if method is not None:
-            gemseo_scenario.set_differentiation_method(method)
-        compile_seconds = _compile(formulation.disciplines[0], method is None)
+        compile_seconds = _compile(formulation.disciplines[0], True)
         started = time.perf_counter()
         objective, design, met, _ = _solve_checked(scenario, gemseo_scenario, budget)
         designs[label] = {
             "objective": objective,
             "met": met,
+            "modes": list(modes),
             "compile_seconds": compile_seconds,
             "seconds": time.perf_counter() - started,
             "calls": len(gemseo_scenario.formulation.optimization_problem.database),
             **spread(design),
         }
-
-    costs = []
-    for count in (10, 20) if smoke else (10, 20, 40, 80):
-        function, point = _statistic_of_design(
-            create_wire_scenario(size=count, constants=nominal),
-            names,
-            design_sample,
-            DESCENT_TIME,
-            MARGIN,
-            factor=factor,
-        )
-        costs.append({"size": count, **_gradient_cost(function, point)})
     _write_json(
         "brachistochrone/robust.json",
         {
             "factor": factor,
             "design_sample": len(design_sample),
             "check_sample": len(check_sample),
+            "fd_step": fd_step,
             "designs": designs,
             "gradient_cost": costs,
         },
@@ -1301,7 +1378,17 @@ def _generate_albatross_robust(smoke: bool) -> None:
         "w_ref": 22.0,
         # A hundred save points, since shooting checks the lift limit and the
         # height floor only where it saves.
-        "integrator": DiffraxIntegrator(dt0=1.0 / 400, n_save=101),
+        "integrator": DiffraxIntegrator(dt0=1.0 / 400, n_save=101, adjoint="Direct"),
+        # Some three hundred constraint rows against eighty-two inputs:
+        # forward mode, through the Direct adjoint, which allows it. The
+        # robust discipline takes forward mode for its constraints and
+        # reverse mode for its one statistic, group by group, and one
+        # integrator serves both. Measured at this size, per Jacobian:
+        # constraints 6.7 s forward through Direct, 26 s reverse through it,
+        # 13 s reverse through the checkpointing adjoint; the statistic
+        # 9.2 s reverse through Direct, 5.9 s through checkpointing. Direct
+        # makes 16 s in all, checkpointing 19 s.
+        "differentiation_method": "forward",
     }
 
     def build():
@@ -1360,9 +1447,23 @@ def _generate_albatross_robust(smoke: bool) -> None:
     seconds = time.perf_counter() - started
     calls = len(gemseo_scenario.formulation.optimization_problem.database)
 
-    function, point = _statistic_of_design(
-        scenario, names, design_sample, quantity, MARGIN, factor=factor
-    )
+    # What one gradient of the margin costs at the robust cycle, by each
+    # adjoint; for one output, reverse mode through either is exact.
+    functions = {}
+    for adjoint, method in (("Direct", "forward"), ("RecursiveCheckpoint", "reverse")):
+        measured = create_energy_scenario(
+            **{
+                **settings,
+                "integrator": DiffraxIntegrator(
+                    dt0=1.0 / 400, n_save=101, adjoint=adjoint
+                ),
+                "differentiation_method": method,
+            }
+        )
+        measured.problem.input_defaults.update(robust)
+        functions[adjoint], point = _statistic_of_design(
+            measured, names, design_sample, quantity, MARGIN, factor=factor
+        )
     designs = {
         "deterministic": {
             "objective": study["objective"],
@@ -1396,9 +1497,408 @@ def _generate_albatross_robust(smoke: bool) -> None:
             "design_sample": len(design_sample),
             "check_sample": len(check_sample),
             "designs": designs,
-            "gradient_cost": _gradient_cost(function, point),
+            "gradient_cost": _gradient_cost(functions, point),
         },
     )
+
+
+# -------------------------------------------------------- differentiation
+
+
+def _measure_configuration(build, adjoints, jit, repeats):
+    """Measure the three modes on one configuration of one problem.
+
+    Parameters
+    ----------
+    build
+        ``adjoint -> scenario``, the problem at this configuration.
+    adjoints
+        The adjoint each mode differentiates the integration through.
+    jit
+        Whether to compile.
+    repeats
+        How many times each Jacobian is timed.
+
+    Returns
+    -------
+    list
+        One record per mode.
+    """
+    from gemseo_tempo.benchmarking.differentiation import as_records
+    from gemseo_tempo.benchmarking.differentiation import flat_function
+    from gemseo_tempo.benchmarking.differentiation import measure_modes
+
+    if not jit:
+        # Without compiling, the checkpointed variant only repeats what
+        # reverse mode shows, at the cost the sweep can least afford.
+        adjoints = {
+            mode: a for mode, a in adjoints.items() if mode != "reverse_checkpointed"
+        }
+    problems = {adjoint: build(adjoint).problem for adjoint in set(adjoints.values())}
+    functions, point = {}, None
+    for mode, adjoint in adjoints.items():
+        problem = problems[adjoint]
+        inputs = list(problem.design_variables)
+        outputs = [problem.objective_name] + [
+            name for name, _ in problem.constraint_names
+        ]
+        functions[mode], point = flat_function(problem, inputs, outputs)
+    # A generic point, a thousandth away from the guess: the sail's guess
+    # heads exactly along a breakpoint of its polar table, where a one-sided
+    # difference straddles a kink and an exact derivative picks one side.
+    offset = numpy.random.default_rng(0).standard_normal(point.size)
+    point = point * (1.0 + 1e-3 * offset)
+    return as_records(measure_modes(functions, point, jit=jit, repeats=repeats))
+
+
+def _differentiation_study(name, builder, adjoints, sweeps, eager, smoke) -> dict:
+    """Sweep the inputs and the outputs, by every mode, compiled and not.
+
+    Parameters
+    ----------
+    name
+        The problem, which names the stored file.
+    builder
+        ``(size, n_save, adjoint) -> scenario``: the control intervals set
+        the inputs, the save points the outputs of any path constraint.
+    adjoints
+        The adjoint each mode differentiates the integration through.
+    sweeps
+        ``{"inputs": (sizes, n_save), "outputs": (size, saves)}``; either
+        may be left out.
+    eager
+        The largest size and save count also measured without compiling,
+        whose cost grows quickly, as ``(size, n_save)``.
+    smoke
+        Whether to run the tiny version, for the tests.
+
+    Returns
+    -------
+    dict
+        What is stored.
+    """
+    repeats = 1 if smoke else 3
+    study = {}
+    if "inputs" in sweeps:
+        sizes, n_save = sweeps["inputs"]
+        records = []
+        for size in sizes[:2] if smoke else sizes:
+            for jit in (True, False) if size <= eager[0] else (True,):
+                records += _measure_configuration(
+                    lambda adjoint, size=size: builder(size, n_save, adjoint),
+                    adjoints,
+                    jit,
+                    repeats,
+                )
+        study["inputs"] = records
+    if "outputs" in sweeps:
+        size, saves = sweeps["outputs"]
+        records = []
+        for n_save in saves[:2] if smoke else saves:
+            for jit in (True, False) if n_save <= eager[1] else (True,):
+                records += _measure_configuration(
+                    lambda adjoint, n_save=n_save: builder(size, n_save, adjoint),
+                    adjoints,
+                    jit,
+                    repeats,
+                )
+        study["outputs"] = records
+    _write_json(f"{name}/differentiation.json", study)
+    return study
+
+
+def _chain_rule(products, seeds, data) -> dict:
+    """Carry total derivatives through a chain of stage Jacobians.
+
+    Parameters
+    ----------
+    products
+        ``(jacobian, wrt, of)`` per stage, in execution order: the Jacobian
+        of the concatenated ``of`` outputs with respect to the concatenated
+        ``wrt`` inputs.
+    seeds
+        The total derivative of each design variable, its identity block.
+    data
+        The values, which give each output's size.
+
+    Returns
+    -------
+    dict
+        The total derivative of every quantity, by name.
+    """
+    derivatives = dict(seeds)
+    for jacobian, wrt, of in products:
+        rows = jacobian @ numpy.vstack([derivatives[name] for name in wrt])
+        start = 0
+        for name in of:
+            count = int(numpy.size(data[name]))
+            derivatives[name] = rows[start : start + count]
+            start += count
+    return derivatives
+
+
+def _chain_modes_study(smoke: bool) -> dict:
+    """Differentiate the albatross's design chain with a mode per stage.
+
+    The split assembly makes three stages of the energy cycle: the statics,
+    which turn the wing into the aerodynamic constants; the dynamics, which
+    fly the cycle; and the outputs, which read its energy and constraints.
+    Each stage is differentiated in its own mode, every combination of the
+    eight, on the bare JAX function of the stage, and the chain Jacobian is
+    their product. Finite differences of the whole chain stand alongside,
+    at their best configuration.
+
+    Parameters
+    ----------
+    smoke
+        Whether to run the tiny version, for the tests.
+
+    Returns
+    -------
+    dict
+        What is stored.
+    """
+    import jax
+
+    from gemseo_tempo.benchmarking.differentiation import FD
+    from gemseo_tempo.benchmarking.differentiation import REVERSE
+    from gemseo_tempo.benchmarking.differentiation import _fastest
+    from gemseo_tempo.benchmarking.differentiation import _measure_differences
+    from gemseo_tempo.benchmarking.differentiation import _memory
+    from gemseo_tempo.dynamics.integrators import DiffraxIntegrator
+    from gemseo_tempo.problems.albatross import create_energy_scenario
+    from gemseo_tempo.problems.albatross.problem import WING_BOUNDS
+    from gemseo_tempo.transcriptions import SingleShooting
+
+    size, n_save = (5, 11) if smoke else (20, 21)
+    repeats = 1 if smoke else 3
+    wing = ["constant." + key for key in WING_BOUNDS]
+    modes = ("forward", "reverse")
+
+    def flatten(values, names):
+        return jnp.concatenate([jnp.ravel(values[name]) for name in names])
+
+    def stage(discipline, wrt, of, data):
+        """Return the stage as a function of one vector, and its point."""
+        shapes = {name: jnp.shape(data[name]) for name in wrt}
+
+        def function(flat):
+            values, start = dict(data), 0
+            for name in wrt:
+                count = int(numpy.prod(shapes[name])) or 1
+                values[name] = jnp.reshape(flat[start : start + count], shapes[name])
+                start += count
+            return flatten(discipline.jax_out_func(values), of)
+
+        return function, flatten(data, wrt)
+
+    records, reference = [], None
+    for combination in itertools.product(modes, repeat=3):
+        methods = dict(
+            zip(("statics", "dynamics", "outputs"), combination, strict=True)
+        )
+        # The Direct adjoint whatever the mode, so that only the mode varies:
+        # it is exact both ways, where the checkpointing one is not always.
+        scenario = create_energy_scenario(
+            transcription=SingleShooting(),
+            size=size,
+            w_ref=22.0,
+            integrator=DiffraxIntegrator(
+                dt0=1.0 / 400, n_save=n_save, adjoint="Direct"
+            ),
+            assembly="split",
+            differentiation_method=methods,
+        )
+        problem = scenario.problem
+        disciplines = dict(
+            zip(("statics", "dynamics", "outputs"), scenario.disciplines, strict=True)
+        )
+        data = dict(problem.input_defaults)
+        for discipline in disciplines.values():
+            inputs = {
+                name: data.get(name, discipline.default_input_data.get(name))
+                for name in discipline.input_grammar.names
+            }
+            data.update(discipline.jax_out_func(inputs))
+        controls = [
+            name for name in problem.design_variables if name.startswith("control.")
+        ]
+        design = controls + wing
+        final = [problem.objective_name] + [n for n, _ in problem.constraint_names]
+        consumers = {
+            "statics": set(disciplines["dynamics"].input_grammar.names)
+            | set(disciplines["outputs"].input_grammar.names),
+            "dynamics": set(disciplines["outputs"].input_grammar.names),
+            "outputs": set(final),
+        }
+        # The total derivative of every quantity with respect to the design,
+        # seeded with the identity on the design itself.
+        sizes = {name: int(numpy.size(data[name])) for name in design}
+        identity = numpy.eye(sum(sizes.values()))
+        seeds, start = {}, 0
+        for name in design:
+            seeds[name] = identity[start : start + sizes[name]]
+            start += sizes[name]
+        record = {"modes": methods}
+        products, known = [], set(design)
+        for label, discipline in disciplines.items():
+            wrt = [n for n in discipline.input_grammar.names if n in known]
+            of = [n for n in discipline.output_grammar.names if n in consumers[label]]
+            known.update(of)
+            function, point = stage(discipline, wrt, of, data)
+            transform = jax.jacfwd if methods[label] == "forward" else jax.jacrev
+            started = time.perf_counter()
+            compiled = jax.jit(transform(function)).lower(point).compile()
+            record[f"{label}_compile"] = time.perf_counter() - started
+            record[f"{label}_seconds"] = _fastest(
+                lambda c=compiled, p=point: c(p), repeats
+            )
+            record[f"{label}_memory"] = _memory(compiled)
+            jacobian = numpy.atleast_2d(numpy.asarray(compiled(point)))
+            record[f"{label}_shape"] = list(jacobian.shape)
+            products.append((jacobian, wrt, of))
+        total = _chain_rule(products, seeds, data)
+        chain_jacobian = numpy.vstack([total[name] for name in final])
+        record["product_seconds"] = _fastest(
+            lambda products=products, seeds=seeds, data=data: _chain_rule(
+                products, seeds, data
+            ),
+            repeats,
+        )
+        record["seconds"] = record["product_seconds"] + sum(
+            record[f"{label}_seconds"] for label in disciplines
+        )
+        record["memory"] = max(record[f"{label}_memory"] for label in disciplines)
+        if reference is None:
+            # The whole chain as one function of the design, differenced, and
+            # differentiated in reverse through the Direct adjoint: the
+            # reference the products are checked against.
+            def whole(flat, problem=problem, design=design, final=final):
+                values = dict(problem.input_defaults)
+                start = 0
+                for name in design:
+                    count = int(numpy.size(values[name]))
+                    values[name] = jnp.reshape(
+                        flat[start : start + count], jnp.shape(values[name])
+                    )
+                    start += count
+                return flatten(problem.jax_function(values), final)
+
+            point = flatten(problem.input_defaults, design)
+            reference = numpy.asarray(jax.jit(jax.jacrev(whole))(point))
+            # At their best: batched or one evaluation at a time, whichever
+            # is faster, at the step closest to the exact Jacobian.
+            jacobians = {REVERSE: reference}
+            measured = _measure_differences(
+                whole, point, True, repeats, 1e-6, jacobians
+            )
+            scale = float(numpy.max(numpy.abs(reference)))
+            fd = {
+                "modes": {"chain": "fd"},
+                "seconds": measured["seconds"],
+                "memory": measured["memory"],
+                "step": measured["step"],
+                "variant": measured["variant"],
+                "error": float(numpy.max(numpy.abs(jacobians[FD] - reference))) / scale,
+            }
+        scale = float(numpy.max(numpy.abs(reference)))
+        record["error"] = (
+            float(numpy.max(numpy.abs(chain_jacobian - reference))) / scale
+        )
+        records.append(record)
+    study = {"size": size, "n_save": n_save, "chains": records, "fd": fd}
+    _write_json("albatross/chain_modes.json", study)
+    return study
+
+
+def _generate_differentiation(name: str, smoke: bool) -> None:
+    """Run one problem's differentiation studies.
+
+    Parameters
+    ----------
+    name
+        The problem.
+    smoke
+        Whether to run the tiny version, for the tests.
+    """
+    from gemseo_tempo.dynamics.integrators import DiffraxIntegrator
+    from gemseo_tempo.transcriptions import SingleShooting
+
+    # Every mode through the Direct adjoint, which is exact in both
+    # directions, and reverse mode once more through the checkpointing one,
+    # the library's default, whose saving is memory and whose risk is
+    # precision.
+    checkpoint = dict.fromkeys(("fd", "forward", "reverse"), "Direct")
+    checkpoint["reverse_checkpointed"] = "RecursiveCheckpoint"
+    if name == "brachistochrone":
+        from gemseo_tempo.problems.brachistochrone import create_scenario
+
+        def builder(size, n_save, adjoint):
+            return create_scenario(
+                transcription=SingleShooting(),
+                variant="ideal",
+                size=size,
+                integrator=DiffraxIntegrator(
+                    dt0=1.0 / 400, n_save=n_save, adjoint=adjoint
+                ),
+            )
+
+        _differentiation_study(
+            name,
+            builder,
+            checkpoint,
+            {"inputs": ((5, 10, 20, 40, 80, 160), 21)},
+            (80, 0),
+            smoke,
+        )
+    elif name == "sail":
+        from gemseo_tempo.problems.sail import create_scenario
+        from gemseo_tempo.problems.sail.problem import sail_integrator
+
+        def builder(size, n_save, adjoint):
+            return create_scenario(
+                transcription=SingleShooting(),
+                size=size,
+                integrator=sail_integrator(dt0=1.0 / 300, n_save=n_save),
+            )
+
+        # The sail's derivatives go through the Direct adjoint either way.
+        _differentiation_study(
+            name,
+            builder,
+            dict.fromkeys(("fd", "forward", "reverse"), "Direct"),
+            {
+                "inputs": ((5, 10, 25, 50, 100, 200), 26),
+                "outputs": (25, (11, 41, 161, 641)),
+            },
+            (50, 161),
+            smoke,
+        )
+    else:
+        from gemseo_tempo.problems.albatross import create_energy_scenario
+
+        def builder(size, n_save, adjoint):
+            return create_energy_scenario(
+                transcription=SingleShooting(),
+                size=size,
+                w_ref=22.0,
+                integrator=DiffraxIntegrator(
+                    dt0=1.0 / 400, n_save=n_save, adjoint=adjoint
+                ),
+            )
+
+        _differentiation_study(
+            name,
+            builder,
+            checkpoint,
+            {
+                "inputs": ((5, 10, 20, 40, 80), 21),
+                "outputs": (20, (11, 41, 161, 641)),
+            },
+            (20, 41),
+            smoke,
+        )
+        _chain_modes_study(smoke)
 
 
 def main(argv=None) -> int:

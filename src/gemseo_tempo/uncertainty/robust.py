@@ -65,6 +65,8 @@ import jax.numpy as jnp
 import numpy
 from gemseo_jax.jax_discipline import JAXDiscipline
 
+from gemseo_tempo.dynamics.integrators import AdjointMethod
+from gemseo_tempo.transcriptions.collocation import HermiteSimpson
 from gemseo_tempo.uncertainty.batch import CONSTANT_PREFIX
 from gemseo_tempo.uncertainty.batch import _quantity
 
@@ -184,6 +186,52 @@ def statistics_function(
     return statistics
 
 
+def _batched_differences(subset, step: float):
+    """Return the Jacobian of ``subset`` by forward differences, vectorized.
+
+    Parameters
+    ----------
+    subset
+        ``(differentiated, fixed) -> {output: value}``.
+    step
+        The step, relative to each input.
+
+    Returns
+    -------
+    Callable
+        ``(differentiated, fixed) -> {output: {input: block}}``, every
+        perturbed point evaluated in one ``vmap``.
+    """
+    from jax.flatten_util import ravel_pytree
+
+    def jacobian(differentiated, fixed):
+        flat, unravel = ravel_pytree(differentiated)
+        outputs = subset(differentiated, fixed)
+        names = list(outputs)
+
+        def flat_outputs(x):
+            values = subset(unravel(x), fixed)
+            return jnp.concatenate([jnp.ravel(values[name]) for name in names])
+
+        steps = step * jnp.maximum(1.0, jnp.abs(flat))
+        points = jnp.vstack([flat, flat + jnp.diag(steps)])
+        values = jax.vmap(flat_outputs)(points)
+        matrix = ((values[1:] - values[0]) / steps[:, None]).T
+        blocks, row = {}, 0
+        for name in names:
+            count = jnp.size(outputs[name])
+            column, blocks[name] = 0, {}
+            # The order ravel_pytree flattens a dictionary in.
+            for key in sorted(differentiated):
+                width = jnp.size(differentiated[key])
+                blocks[name][key] = matrix[row : row + count, column : column + width]
+                column += width
+            row += count
+        return blocks
+
+    return jacobian
+
+
 class GroupedJAXDiscipline(JAXDiscipline):
     """A JAX discipline whose Jacobian is taken one group of outputs at a time.
 
@@ -197,12 +245,29 @@ class GroupedJAXDiscipline(JAXDiscipline):
     group by group, each compiled transform keeps only what its outputs
     need, so the constraints are differentiated on the one trajectory and
     the handful of statistics through the sample.
+
+    Each group also takes its own mode. ``"auto"`` chooses forward mode when
+    the group has fewer inputs than outputs and the integration allows it,
+    reverse mode otherwise, which is what makes it cheap: a path constraint
+    checked at every save point is many rows against few controls, and a
+    statistic is one row against all of them. ``"fd"`` takes forward
+    differences instead, every perturbed point in one vectorized call,
+    which is the best finite differences can do and the fair comparison.
     """
 
+    MODES = ("auto", "forward", "reverse", "fd")
+    """The ways a group can be differentiated."""
+
     def __init__(
-        self, *args, groups: Sequence[Sequence[str]], forward: bool = False, **kwargs
+        self,
+        *args,
+        groups: Sequence[Sequence[str]],
+        modes: Sequence[str] | None = None,
+        forward_allowed: bool = True,
+        fd_step: float = 1e-7,
+        **kwargs,
     ) -> None:
-        """Store the output groups.
+        """Store the output groups and how each is differentiated.
 
         Parameters
         ----------
@@ -212,17 +277,51 @@ class GroupedJAXDiscipline(JAXDiscipline):
         groups
             The output names, partitioned into the groups differentiated
             together.
-        forward
-            Whether to differentiate in forward mode rather than reverse.
+        modes
+            The mode of each group, one of :attr:`MODES`; ``"auto"`` for
+            every group when omitted.
+        forward_allowed
+            Whether forward mode can differentiate the function at all, which
+            an integration through a reverse-only adjoint forbids.
+        fd_step
+            The finite-difference step, relative to each input.
         **kwargs
             The keyword arguments of the base discipline.
+
+        Raises
+        ------
+        ValueError
+            If a mode is unknown, or forward mode is asked for where it is
+            not allowed.
         """
         self._groups = [tuple(group) for group in groups]
-        self._transform = jax.jacfwd if forward else jax.jacrev
+        modes = tuple(modes or ("auto",) * len(self._groups))
+        unknown = sorted(set(modes) - set(self.MODES))
+        if unknown or len(modes) != len(self._groups):
+            msg = f"Expected one of {list(self.MODES)} per group, got {list(modes)}."
+            raise ValueError(msg)
+        if "forward" in modes and not forward_allowed:
+            msg = "Forward mode is not allowed through this integration."
+            raise ValueError(msg)
+        self._modes = modes
+        self._forward_allowed = forward_allowed
+        self._fd_step = fd_step
         self._compiled_groups: dict[tuple, Callable] = {}
         super().__init__(*args, **kwargs)
 
-    def _group_jacobian(self, outputs: tuple, inputs: tuple, data: dict) -> dict:
+    def _mode(self, mode: str, outputs: tuple, inputs: tuple, data: dict) -> str:
+        """Resolve ``"auto"`` into the cheaper exact mode for a group's shape."""
+        if mode != "auto":
+            return mode
+        n_inputs = sum(numpy.size(data[name]) for name in inputs)
+        n_outputs = sum(numpy.size(self.io.data[name]) for name in outputs)
+        return (
+            "forward" if self._forward_allowed and n_inputs < n_outputs else "reverse"
+        )
+
+    def _group_jacobian(
+        self, outputs: tuple, inputs: tuple, data: dict, mode: str = "reverse"
+    ) -> dict:
         """Differentiate one group of outputs.
 
         Parameters
@@ -233,13 +332,15 @@ class GroupedJAXDiscipline(JAXDiscipline):
             The inputs to differentiate with respect to.
         data
             The full input data.
+        mode
+            ``"forward"``, ``"reverse"`` or ``"fd"``.
 
         Returns
         -------
         dict
             ``{output: {input: array}}``.
         """
-        key = (outputs, inputs)
+        key = (outputs, inputs, mode)
         compiled = self._compiled_groups.get(key)
         if compiled is None:
 
@@ -247,7 +348,13 @@ class GroupedJAXDiscipline(JAXDiscipline):
                 values = self.jax_out_func({**fixed, **differentiated})
                 return {name: values[name] for name in outputs}
 
-            compiled = jax.jit(self._transform(subset))
+            if mode == "fd":
+                transform = _batched_differences(subset, self._fd_step)
+            else:
+                transform = (
+                    jax.jacfwd(subset) if mode == "forward" else jax.jacrev(subset)
+                )
+            compiled = jax.jit(transform)
             self._compiled_groups[key] = compiled
         return compiled({name: data[name] for name in inputs}, data)
 
@@ -261,10 +368,11 @@ class GroupedJAXDiscipline(JAXDiscipline):
         inputs = tuple(self._differentiated_input_names)
         wanted = set(self._differentiated_output_names)
         jacobian = {}
-        for group in self._groups:
+        for group, mode in zip(self._groups, self._modes, strict=True):
             outputs = tuple(name for name in group if name in wanted)
             if outputs:
-                jacobian.update(self._group_jacobian(outputs, inputs, data))
+                mode = self._mode(mode, outputs, inputs, data)
+                jacobian.update(self._group_jacobian(outputs, inputs, data, mode))
         sizes = {name: numpy.asarray(value).size for name, value in data.items()}
         self.jac = {
             output: {
@@ -291,6 +399,8 @@ def robust_discipline(
     target: float = 0.95,
     name: str = "robust_scenario",
     prefix: str = CONSTANT_PREFIX,
+    modes: Sequence[str] = ("auto", "auto"),
+    fd_step: float = 1e-7,
 ):
     """Wrap the transcription and the statistics as **one** JAX discipline.
 
@@ -342,6 +452,13 @@ def robust_discipline(
         The discipline name.
     prefix
         The grammar prefix of the uncertain inputs.
+    modes
+        How the transcription's outputs and the statistics are each
+        differentiated; see :class:`GroupedJAXDiscipline`. Forward mode is
+        allowed when the transcription does not integrate, or integrates
+        through the Direct adjoint.
+    fd_step
+        The finite-difference step of a group differentiated by ``"fd"``.
 
     Returns
     -------
@@ -374,6 +491,11 @@ def robust_discipline(
 
     statistic_outputs = [f"{quantity}.{statistic}" for statistic in statistic_names]
     method = JAXDiscipline.DifferentiationMethod(scenario.differentiation_method)
+    integrator = scenario.definition["integrator"]
+    forward_allowed = (
+        isinstance(scenario.transcription, HermiteSimpson)
+        or getattr(integrator, "adjoint_method", None) == AdjointMethod.DIRECT
+    )
     return GroupedJAXDiscipline(
         function=function,
         input_names=list(problem.input_defaults),
@@ -382,7 +504,9 @@ def robust_discipline(
         differentiation_method=method,
         name=name,
         groups=(problem.output_names, statistic_outputs),
-        forward=method == JAXDiscipline.DifferentiationMethod.FORWARD,
+        modes=modes,
+        forward_allowed=forward_allowed,
+        fd_step=fd_step,
     )
 
 

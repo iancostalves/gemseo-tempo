@@ -124,6 +124,7 @@ object is documented once, under the module that defines it.
    gemseo_tempo.benchmarking.runner
    gemseo_tempo.benchmarking.studies
    gemseo_tempo.benchmarking.timing
+   gemseo_tempo.benchmarking.differentiation
    gemseo_tempo.benchmarking.transcriptions
    gemseo_tempo.benchmarking.sampling
    gemseo_tempo.benchmarking.suites

@@ -1,0 +1,272 @@
+{
+ "size": 20,
+ "n_save": 21,
+ "chains": [
+  {
+   "modes": {
+    "statics": "forward",
+    "dynamics": "forward",
+    "outputs": "forward"
+   },
+   "statics_compile": 0.14562295399991854,
+   "statics_seconds": 2.599600156827364e-05,
+   "statics_memory": 1024,
+   "statics_shape": [
+    4,
+    3
+   ],
+   "dynamics_compile": 5.050749936999637,
+   "dynamics_seconds": 2.569590776000041,
+   "dynamics_memory": 236016,
+   "dynamics_shape": [
+    315,
+    47
+   ],
+   "outputs_compile": 0.1547661180011346,
+   "outputs_seconds": 0.00018740999985311646,
+   "outputs_memory": 174088,
+   "outputs_shape": [
+    67,
+    320
+   ],
+   "product_seconds": 0.00030933200105209835,
+   "seconds": 2.5701135140025144,
+   "memory": 236016,
+   "error": 2.2154028391496306e-14
+  },
+  {
+   "modes": {
+    "statics": "forward",
+    "dynamics": "forward",
+    "outputs": "reverse"
+   },
+   "statics_compile": 0.11878566799896362,
+   "statics_seconds": 2.3766000595060177e-05,
+   "statics_memory": 1024,
+   "statics_shape": [
+    4,
+    3
+   ],
+   "dynamics_compile": 4.9036813719994825,
+   "dynamics_seconds": 2.544746899000529,
+   "dynamics_memory": 236016,
+   "dynamics_shape": [
+    315,
+    47
+   ],
+   "outputs_compile": 0.22926621599981445,
+   "outputs_seconds": 0.0011326949988870183,
+   "outputs_memory": 174145,
+   "outputs_shape": [
+    67,
+    320
+   ],
+   "product_seconds": 0.000479690001156996,
+   "seconds": 2.546383050001168,
+   "memory": 236016,
+   "error": 2.2154028391496306e-14
+  },
+  {
+   "modes": {
+    "statics": "forward",
+    "dynamics": "reverse",
+    "outputs": "forward"
+   },
+   "statics_compile": 0.14058897699942463,
+   "statics_seconds": 1.8636999811860733e-05,
+   "statics_memory": 1024,
+   "statics_shape": [
+    4,
+    3
+   ],
+   "dynamics_compile": 14.553338906000135,
+   "dynamics_seconds": 14.739330395999787,
+   "dynamics_memory": 2797040,
+   "dynamics_shape": [
+    315,
+    47
+   ],
+   "outputs_compile": 0.2961617419987306,
+   "outputs_seconds": 0.00024164999922504649,
+   "outputs_memory": 174088,
+   "outputs_shape": [
+    67,
+    320
+   ],
+   "product_seconds": 0.00031508199936070014,
+   "seconds": 14.739905764998184,
+   "memory": 2797040,
+   "error": 5.662625861589648e-14
+  },
+  {
+   "modes": {
+    "statics": "forward",
+    "dynamics": "reverse",
+    "outputs": "reverse"
+   },
+   "statics_compile": 0.12912321300063923,
+   "statics_seconds": 0.0004433690010046121,
+   "statics_memory": 1024,
+   "statics_shape": [
+    4,
+    3
+   ],
+   "dynamics_compile": 23.817676623999432,
+   "dynamics_seconds": 14.33408576399961,
+   "dynamics_memory": 2797040,
+   "dynamics_shape": [
+    315,
+    47
+   ],
+   "outputs_compile": 0.5013421610001387,
+   "outputs_seconds": 0.0003957049993914552,
+   "outputs_memory": 174145,
+   "outputs_shape": [
+    67,
+    320
+   ],
+   "product_seconds": 0.0002859500000340631,
+   "seconds": 14.33521078800004,
+   "memory": 2797040,
+   "error": 5.662625861589648e-14
+  },
+  {
+   "modes": {
+    "statics": "reverse",
+    "dynamics": "forward",
+    "outputs": "forward"
+   },
+   "statics_compile": 0.20853367800009437,
+   "statics_seconds": 1.6933001461438835e-05,
+   "statics_memory": 1024,
+   "statics_shape": [
+    4,
+    3
+   ],
+   "dynamics_compile": 5.109407321999242,
+   "dynamics_seconds": 2.8768281979992025,
+   "dynamics_memory": 236016,
+   "dynamics_shape": [
+    315,
+    47
+   ],
+   "outputs_compile": 0.17400402699968254,
+   "outputs_seconds": 0.0001774039992596954,
+   "outputs_memory": 174088,
+   "outputs_shape": [
+    67,
+    320
+   ],
+   "product_seconds": 0.0002647159999469295,
+   "seconds": 2.8772872509998706,
+   "memory": 236016,
+   "error": 2.2247702930149567e-14
+  },
+  {
+   "modes": {
+    "statics": "reverse",
+    "dynamics": "forward",
+    "outputs": "reverse"
+   },
+   "statics_compile": 0.1945972539997456,
+   "statics_seconds": 1.3050999768893234e-05,
+   "statics_memory": 1024,
+   "statics_shape": [
+    4,
+    3
+   ],
+   "dynamics_compile": 4.773930788000143,
+   "dynamics_seconds": 3.1895567270003085,
+   "dynamics_memory": 236016,
+   "dynamics_shape": [
+    315,
+    47
+   ],
+   "outputs_compile": 0.22673077599938551,
+   "outputs_seconds": 0.0009186520001094323,
+   "outputs_memory": 174145,
+   "outputs_shape": [
+    67,
+    320
+   ],
+   "product_seconds": 0.00025160599943774287,
+   "seconds": 3.1907400359996245,
+   "memory": 236016,
+   "error": 2.2247702930149567e-14
+  },
+  {
+   "modes": {
+    "statics": "reverse",
+    "dynamics": "reverse",
+    "outputs": "forward"
+   },
+   "statics_compile": 0.13791894399946614,
+   "statics_seconds": 0.0003311729997221846,
+   "statics_memory": 1024,
+   "statics_shape": [
+    4,
+    3
+   ],
+   "dynamics_compile": 14.167678326000896,
+   "dynamics_seconds": 14.85677281199969,
+   "dynamics_memory": 2797040,
+   "dynamics_shape": [
+    315,
+    47
+   ],
+   "outputs_compile": 0.37236089399993944,
+   "outputs_seconds": 0.00023358900034509134,
+   "outputs_memory": 174088,
+   "outputs_shape": [
+    67,
+    320
+   ],
+   "product_seconds": 0.00040321500091522466,
+   "seconds": 14.857740789000673,
+   "memory": 2797040,
+   "error": 5.6579421346569845e-14
+  },
+  {
+   "modes": {
+    "statics": "reverse",
+    "dynamics": "reverse",
+    "outputs": "reverse"
+   },
+   "statics_compile": 0.14572001200031082,
+   "statics_seconds": 0.0005427980013337219,
+   "statics_memory": 1024,
+   "statics_shape": [
+    4,
+    3
+   ],
+   "dynamics_compile": 25.94069503100036,
+   "dynamics_seconds": 15.118325473000368,
+   "dynamics_memory": 2797040,
+   "dynamics_shape": [
+    315,
+    47
+   ],
+   "outputs_compile": 0.4470873419995769,
+   "outputs_seconds": 0.00015956499919411726,
+   "outputs_memory": 174145,
+   "outputs_shape": [
+    67,
+    320
+   ],
+   "product_seconds": 0.0002664499988895841,
+   "seconds": 15.119294285999786,
+   "memory": 2797040,
+   "error": 5.6579421346569845e-14
+  }
+ ],
+ "fd": {
+  "modes": {
+   "chain": "fd"
+  },
+  "seconds": 2.580858499999522,
+  "memory": 152432,
+  "step": 1e-08,
+  "variant": "batched",
+  "error": 1.2625566240151856e-06
+ }
+}

@@ -13,10 +13,34 @@ per output and suits the usual shape of these problems, few objectives and
 constraints against many design variables. Forward mode costs one pass per
 input and wins when that ratio is inverted.
 
-The split assembly deliberately mixes the two: the statics discipline always
+The split assembly mixes the two. By default the statics discipline
 differentiates in forward mode, being a cheap algebraic chain with more
 outputs than inputs, while the ODE-bearing disciplines follow the scenario's
-choice.
+choice. Each stage can also be given its own mode, since each has its own
+ratio of inputs to outputs:
+
+```python
+DynamicScenario(
+    assembly="split",
+    differentiation_method={"statics": "reverse", "dynamics": "forward"},
+    ...,
+)
+```
+
+A stage left out keeps its default; the mode of the dynamics stage must
+still agree with the integrator's adjoint. The papers measure what each
+choice costs in time and memory, on the albatross's design chain in
+particular: {doc}`../problems/albatross`.
+
+Finite differences are a stronger baseline than they are usually taken for.
+A JAX model can evaluate every perturbed point in one vectorized call, and
+batched that way they cost about what forward mode costs, since both push
+one direction per input through the model: on all three problems the two
+ran within a factor of 1.4 of each other at every size measured. What
+finite differences give up is precision, six to eight digits against
+fifteen, and a step that has to be tuned against something exact. Reverse
+mode is the one that changes the count, one pass per output, which is why
+it wins where the outputs are few.
 
 ## The adjoint has to agree with the mode
 
@@ -42,6 +66,15 @@ a JAX trace with `can't apply jvp to a custom_vjp function`.
   - no
   - yes
 ```
+
+Supported is not the same as exact. A discipline Jacobian is a `jacrev`
+over all its outputs at once, which batches the reverse pass, and the
+checkpointed adjoint has returned inexact Jacobians that way: on the sail
+at its optimum, and on the albatross on some save grids, by 1% to 14%,
+where a single gradient through it stays exact. The Direct adjoint was exact in
+both modes wherever it was measured, at the price of storing the whole
+solve; each paper's differentiation section shows both, on the precision
+and the memory they trade.
 
 {func}`~gemseo_tempo.dynamics.integrators.check_adjoint_compatibility`
 enforces this table up front, so an incompatible pairing is rejected when the

@@ -70,6 +70,22 @@ The variables, from the registry the model reads:
 
 ## Deterministic optimal control
 
+:::{admonition} Takeaway: the deterministic problem
+:class: tip
+
+- **Transcription:** Hermite–Simpson collocation, the cheapest route to the
+  optimum, {docvalue}`brachistochrone/transcriptions.json:rows.7.seconds:.1f` s at twenty segments. Single
+  shooting reaches the same answer at about five times the cost; indirect
+  shooting, warm-started from collocation, confirms it to
+  {docvalue}`brachistochrone/transcriptions.json:rows.10.error:.0e`.
+- **Discretization:** ten to twenty segments. Beyond that the error stops
+  falling, held at the optimizer's tolerance.
+- **Differentiation:** reverse mode through the checkpointing adjoint,
+  compiled: three outputs, three backward passes, the fastest and the
+  leanest exact mode. Finite differences batched into one call run close
+  behind, with eight digits rather than sixteen.
+:::
+
 ### Variants
 
 One method throughout: collocation on twenty segments, solved by SLSQP
@@ -144,7 +160,80 @@ Nothing about the problem is written by hand: JAX differentiates the
 dynamics for the costate equations, and the optimal path angle is found by
 minimizing the Hamiltonian numerically.
 
+### Differentiation
+
+The ideal descent by single shooting, its Jacobian taken four ways: by
+finite differences; by forward mode; and by reverse mode, once through the
+Direct adjoint and once through the checkpointing one the library uses by
+default. Three outputs, the time and the two terminal misses, against a
+growing number of path angles; compiled (solid) and not (dashed).
+
+Each method is measured at its best. Finite differences are forward
+differences at the step, from 10⁻⁴ to 10⁻⁹, that comes closest to the
+exact Jacobian, timed both batched into one vectorized call and one
+evaluation at a time, the faster counting. Compilation is paid once per
+program, and is charged separately, below:
+
+```{eval-rst}
+.. plot:: _ext/gallery/brachistochrone_mode_sweep.py
+   :include-source: false
+```
+
+Batched into one vectorized call, finite differences are not the slow
+method they are usually taken for: at {docvalue}`brachistochrone/differentiation.json:inputs.35.n_inputs:d`
+inputs they take {docvalue}`brachistochrone/differentiation.json:inputs.35.seconds:.3f` s, against
+{docvalue}`brachistochrone/differentiation.json:inputs.36.seconds:.3f` s by forward mode, which also pushes
+every input direction through the model in one batch and costs about the
+same. Reverse mode needs only three backward passes, one per output, and
+through the checkpointing adjoint it is the fastest at all sizes but one:
+{docvalue}`brachistochrone/differentiation.json:inputs.38.seconds:.3f` s at the largest. Through the Direct
+adjoint it pays to store the whole solve, and overtakes the batched methods
+only on the largest grid. Not compiling costs a quarter to a half more, less
+than expected, because diffrax compiles its own integration whatever the
+caller does: what is left uncompiled is the code around it. Compiling has
+its own cost, paid once per program:
+
+```{eval-rst}
+.. plot:: _ext/gallery/brachistochrone_compile_times.py
+   :include-source: false
+```
+
+The function compiles in about a second at every size, its batched
+differences in under two, its forward Jacobian in two to four and its
+reverse one in five to ten, since the reverse program carries the backward
+sweep as well as the forward one.
+At twenty intervals, each method on the four costs, the best at the rim:
+
+```{eval-rst}
+.. plot:: _ext/gallery/brachistochrone_mode_radar.py
+   :include-source: false
+```
+
+| method | compilation | one Jacobian | error | memory |
+| --- | --- | --- | --- | --- |
+| finite differences | {docvalue}`brachistochrone/differentiation.json:inputs.14.compile_jacobian:.1f` s | {docvalue}`brachistochrone/differentiation.json:inputs.14.seconds:.3f` s | {docvalue}`brachistochrone/differentiation.json:inputs.14.error:.0e` | {docvalue}`brachistochrone/differentiation.json:inputs.14.memory:.0f*0.001` kB |
+| forward | {docvalue}`brachistochrone/differentiation.json:inputs.15.compile_jacobian:.1f` s | {docvalue}`brachistochrone/differentiation.json:inputs.15.seconds:.3f` s | {docvalue}`brachistochrone/differentiation.json:inputs.15.error:.0e` | {docvalue}`brachistochrone/differentiation.json:inputs.15.memory:.0f*0.001` kB |
+| reverse | {docvalue}`brachistochrone/differentiation.json:inputs.16.compile_jacobian:.1f` s | {docvalue}`brachistochrone/differentiation.json:inputs.16.seconds:.3f` s | {docvalue}`brachistochrone/differentiation.json:inputs.16.error:.0e` | {docvalue}`brachistochrone/differentiation.json:inputs.16.memory:.0f*0.001` kB |
+| reverse, checkpointed | {docvalue}`brachistochrone/differentiation.json:inputs.17.compile_jacobian:.1f` s | {docvalue}`brachistochrone/differentiation.json:inputs.17.seconds:.3f` s | {docvalue}`brachistochrone/differentiation.json:inputs.17.error:.0e` | {docvalue}`brachistochrone/differentiation.json:inputs.17.memory:.0f*0.001` kB |
+
+Reverse mode through the checkpointing adjoint is the cheapest in time at
+almost every size, and the leanest of the exact methods in memory, which is what
+checkpointing is for. Batched finite differences come a close second in
+time and compile fastest, and pay in precision: eight digits, against the
+sixteen of every exact mode.
+
 ## Uncertainty propagation
+
+:::{admonition} Takeaway: uncertainty propagation
+:class: tip
+
+- **Sampling:** vectorized with `vmap`, never looped, and on a wire, not a
+  steering schedule, so that only the time is uncertain.
+- **Estimator:** first-order Taylor, two model calls, since the descent time
+  is nearly linear in the three constants.
+- **Differentiation:** finite differences, batched into one call: with
+  three uncertain inputs they lose nothing and are the quicker.
+:::
 
 A wire, once built, meets friction and drag nobody measured exactly:
 {var}`g <symbol>`, {var}`mu <symbol>` and {var}`k_over_m <symbol>` are
@@ -172,8 +261,9 @@ it takes {docvalue}`brachistochrone/propagation.json:reference.mean:.4f` s
 on average, give or take
 {docvalue}`brachistochrone/propagation.json:reference.standard_deviation:.4f` s.
 Each way of estimating that, against 20 000 draws, where AD marks exact
-derivatives by reverse-mode automatic differentiation and FD finite
-differences:
+derivatives by reverse-mode automatic differentiation and FD central
+differences, every perturbed point in the same vectorized call, at the
+step closest to the exact derivative at the mean:
 
 | method | error, mean | error, deviation | model calls | time |
 | --- | --- | --- | --- | --- |
@@ -200,6 +290,20 @@ respect to many variables, which is what the next section needs.
 
 ## Optimization under uncertainty
 
+:::{admonition} Takeaway: optimization under uncertainty
+:class: tip
+
+- **Formulation:** the wire designed for the mean constants; a robust
+  objective finds the same wire.
+- **Sampling:** one fixed sample of {docvalue}`brachistochrone/robust.json:design_sample:d` draws,
+  the same at every iteration, checked afterwards on
+  {docvalue}`brachistochrone/robust.json:check_sample:d` fresh ones.
+- **Differentiation:** automatic, in the loop, once the design is large:
+  an AD gradient costs about the same whatever its size. At twenty
+  variables, finite differences batched into one call compile in half the
+  time and win a single solve.
+:::
+
 Three wires, each flown on
 {docvalue}`brachistochrone/robust.json:check_sample:d` fresh draws:
 
@@ -217,22 +321,30 @@ by SLSQP from the same start with each kind of gradient:
 
 | gradient | iterations | compilation | optimization |
 | --- | --- | --- | --- |
-| AD, one reverse pass | {docvalue}`brachistochrone/robust.json:designs.robust.calls:d` | {docvalue}`brachistochrone/robust.json:designs.robust.compile_seconds:.1f` s | {docvalue}`brachistochrone/robust.json:designs.robust.seconds:.1f` s |
-| FD, by GEMSEO | {docvalue}`brachistochrone/robust.json:designs.robust_fd.calls:d` | {docvalue}`brachistochrone/robust.json:designs.robust_fd.compile_seconds:.1f` s | {docvalue}`brachistochrone/robust.json:designs.robust_fd.seconds:.1f` s |
+| AD, reverse mode | {docvalue}`brachistochrone/robust.json:designs.robust.calls:d` | {docvalue}`brachistochrone/robust.json:designs.robust.compile_seconds:.1f` s | {docvalue}`brachistochrone/robust.json:designs.robust.seconds:.1f` s |
+| FD, batched | {docvalue}`brachistochrone/robust.json:designs.robust_fd.calls:d` | {docvalue}`brachistochrone/robust.json:designs.robust_fd.compile_seconds:.1f` s | {docvalue}`brachistochrone/robust.json:designs.robust_fd.seconds:.1f` s |
 
 Both reach the same wire in the same number of iterations. Each iteration
 differentiates the mean and deviation of
 {docvalue}`brachistochrone/robust.json:design_sample:d` descents with respect to all
-{docvalue}`brachistochrone/robust.json:gradient_cost.1.n_design:d` design variables: by AD that is
-one reverse pass through the whole batch; by finite differences, one more
-batch per variable. AD pays once to compile the reverse pass, and then runs
-the loop several times faster. The gap grows with the design, because the
-cost of an AD gradient does not:
+{docvalue}`brachistochrone/robust.json:gradient_cost.1.n_design:d` design variables. By AD that is one
+reverse pass through the whole batch, through the checkpointing adjoint,
+the fastest exact route measured; by finite differences, every perturbed
+wire flown in the same vectorized call, at the step closest to the exact
+gradient. The loop runs about twice as fast with AD, but AD compiles for
+twice as long, and over one solve of twenty iterations, compilation
+included, the batched differences come out ahead. What turns it is the
+size of the design: an AD gradient costs about the same however many
+variables there are, while the batch of differences grows with every one,
+to {docvalue}`brachistochrone/robust.json:gradient_cost.3.fd_seconds:.2f` s against
+{docvalue}`brachistochrone/robust.json:gradient_cost.3.ad_seconds:.2f` s at
+{docvalue}`brachistochrone/robust.json:gradient_cost.3.n_design:d` variables:
 
 ```{eval-rst}
 .. plot:: _ext/gallery/brachistochrone_gradient_cost.py
    :include-source: false
 ```
+
 
 ## References
 

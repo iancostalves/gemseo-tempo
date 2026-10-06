@@ -103,8 +103,12 @@ What singles this problem out is the wind field. It is the only one whose
 right-hand side reads an interpolated
 :class:`~gemseo_tempo.dynamics.fields.SpatialField`, whose transpose is a
 scatter-add, and that is what the checkpointed reverse pass mishandles once
-it is itself batched. The brachistochrone and the albatross are exact under
-both adjoints at every route measured.
+it is itself batched. It is not the only
+problem the batched pass can get wrong: the albatross's energy cycle, flown
+by single shooting at a fixed step, came out exact with a hundred save
+points but 1% to 14% off with twenty or forty, against forward mode and
+finite differences that agree with each other; the brachistochrone was
+exact everywhere measured. Its pages report the comparison.
 
 The Direct adjoint unrolls the solve instead of checkpointing it and is
 exact everywhere measured. It costs about a third more to solve the

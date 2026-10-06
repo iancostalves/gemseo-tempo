@@ -157,8 +157,13 @@ def test_the_robust_wire_is_the_same_by_either_gradient():
     assert designs["robust_fd"]["objective"] == pytest.approx(
         designs["robust"]["objective"], rel=1e-4
     )
-    # And the loop runs several times faster with it, compilation apart.
-    assert 3.0 * designs["robust"]["seconds"] < designs["robust_fd"]["seconds"]
+    # The loop runs faster with AD, which compiles for longer, and at this
+    # size the batched differences win the solve once that is counted.
+    ad, fd = designs["robust"], designs["robust_fd"]
+    assert ad["seconds"] < fd["seconds"]
+    assert ad["compile_seconds"] > fd["compile_seconds"]
+    total = lambda design: design["seconds"] + design["compile_seconds"]  # noqa: E731
+    assert total(fd) < total(ad)
 
 
 # ------------------------------------------------------------------- sail
@@ -403,3 +408,146 @@ def test_the_robust_cycle_trades_its_forecast_energy_for_less_spread():
     assert robust["p05"] > deterministic["p05"] + 1.0
     cost = study["gradient_cost"]
     assert cost["ad_seconds"] < cost["fd_seconds"]
+
+
+DIFFERENTIATED = ("brachistochrone", "sail", "albatross")
+"""The problems whose pages compare the ways of taking a Jacobian."""
+
+
+def _differentiation_records(problem):
+    study = _load(f"{problem}/differentiation.json")
+    return [record for records in study.values() for record in records]
+
+
+@pytest.mark.parametrize("problem", DIFFERENTIATED)
+def test_exact_jacobians_agree_and_differences_do_not(problem):
+    """Forward and reverse through the Direct adjoint agree to rounding.
+
+    The checkpointed variant is left out: on some albatross save grids its
+    batched reverse pass is off by percents, which the page reports.
+    """
+    for record in _differentiation_records(problem):
+        if record["mode"] in ("forward", "reverse"):
+            assert record["error"] < 1e-10, record
+        elif record["mode"] == "fd":
+            assert 1e-10 < record["error"] < 1e-2, record
+
+
+@pytest.mark.parametrize("problem", DIFFERENTIATED)
+def test_batched_differences_keep_pace_with_forward_mode(problem):
+    """Both push every input direction through the model in one batch.
+
+    So at their best, batched into one call, finite differences cost what
+    forward mode costs, within a factor of two either way, at every size;
+    what they give up is precision, which the test above checks.
+    """
+    compiled = [r for r in _differentiation_records(problem) if r["jit"]]
+    for record in compiled:
+        if record["mode"] == "fd":
+            forward = next(
+                r
+                for r in compiled
+                if r["mode"] == "forward"
+                and (r["n_inputs"], r["n_outputs"])
+                == (record["n_inputs"], record["n_outputs"])
+            )
+            assert 0.5 < record["seconds"] / forward["seconds"] < 2.0, record
+
+
+def test_checkpointed_reverse_leads_the_brachistochrone():
+    """Three outputs, three backward passes: the fastest at all sizes but one."""
+    compiled = [
+        r for r in _load("brachistochrone/differentiation.json")["inputs"] if r["jit"]
+    ]
+    sizes = sorted({r["n_inputs"] for r in compiled})
+    led = [
+        min((r for r in compiled if r["n_inputs"] == size), key=lambda r: r["seconds"])[
+            "mode"
+        ]
+        == "reverse_checkpointed"
+        for size in sizes
+    ]
+    assert led[-1]
+    assert sum(led) >= len(sizes) - 1
+
+
+@pytest.mark.parametrize("problem", DIFFERENTIATED)
+def test_reverse_compiles_slower_than_forward_than_the_function(problem):
+    """The page's reading of the compilation figure."""
+    for record in _differentiation_records(problem):
+        if record["jit"] and record["mode"] == "reverse":
+            forward = next(
+                r
+                for r in _differentiation_records(problem)
+                if r["jit"]
+                and r["mode"] == "forward"
+                and (r["n_inputs"], r["n_outputs"])
+                == (record["n_inputs"], record["n_outputs"])
+            )
+            assert record["compile_jacobian"] > forward["compile_jacobian"]
+            assert forward["compile_jacobian"] > forward["compile_function"]
+
+
+def test_forward_mode_wins_on_the_sail_in_time_and_in_memory():
+    """What the sail's differentiation section says of the two exact modes."""
+    records = _differentiation_records("sail")
+    for record in records:
+        if record["jit"] and record["mode"] == "reverse":
+            forward = next(
+                r
+                for r in records
+                if r["jit"]
+                and r["mode"] == "forward"
+                and (r["n_inputs"], r["n_outputs"])
+                == (record["n_inputs"], record["n_outputs"])
+            )
+            assert forward["seconds"] < record["seconds"]
+            assert forward["memory"] < record["memory"]
+
+
+def test_the_albatross_sweeps_say_what_its_page_says():
+    """Exact reverse never leads; checkpointed reverse is faster late, and wrong."""
+    records = _differentiation_records("albatross")
+    compiled = [r for r in records if r["jit"]]
+
+    def twin(record, mode):
+        return next(
+            r
+            for r in compiled
+            if r["mode"] == mode
+            and (r["n_inputs"], r["n_outputs"])
+            == (record["n_inputs"], record["n_outputs"])
+        )
+
+    for record in compiled:
+        if record["mode"] == "reverse":
+            # Never ahead of forward mode; level, at most, on the largest grid.
+            assert twin(record, "forward")["seconds"] < 1.05 * record["seconds"]
+    largest = max(r["n_inputs"] for r in compiled)
+    checkpointed = next(
+        r
+        for r in compiled
+        if r["mode"] == "reverse_checkpointed" and r["n_inputs"] == largest
+    )
+    assert checkpointed["seconds"] < twin(checkpointed, "forward")["seconds"]
+    assert (
+        max(r["error"] for r in compiled if r["mode"] == "reverse_checkpointed") > 1e-2
+    )
+
+
+def test_the_dynamics_alone_decide_the_cost_of_the_chain():
+    """Every choice of modes gives the same Jacobian; only the dynamics' costs."""
+    study = _load("albatross/chain_modes.json")
+    for chain in study["chains"]:
+        assert chain["error"] < 1e-10
+        assert chain["statics_seconds"] < 1e-2
+        assert chain["outputs_seconds"] < 1e-2
+    forward = [c for c in study["chains"] if c["modes"]["dynamics"] == "forward"]
+    reverse = [c for c in study["chains"] if c["modes"]["dynamics"] == "reverse"]
+    assert max(c["seconds"] for c in forward) < min(c["seconds"] for c in reverse)
+    assert max(c["memory"] for c in forward) < min(c["memory"] for c in reverse)
+    # Batched into one call, differences of the whole chain cost what the
+    # forward chains do, and give up digits for it.
+    fastest = min(c["seconds"] for c in forward)
+    assert 0.5 < study["fd"]["seconds"] / fastest < 2.0
+    assert study["fd"]["error"] > 1e-9
