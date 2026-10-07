@@ -191,9 +191,15 @@ def wire_bounds(scenario: DynamicScenario) -> dict[str, tuple[float, float]]:
     -------
     dict
         The angle between level and vertical, and a length from the
-        straight line to four times it, by its square root.
+        straight line to four times it, by its square root. The straight
+        line is the scenario's own, from its start to its target.
     """
-    straight = float(numpy.hypot(*TARGET))
+    boundary = scenario.definition["boundary"]
+    straight = float(
+        numpy.hypot(
+            boundary.s1["x"] - boundary.s0["x"], boundary.s1["y"] - boundary.s0["y"]
+        )
+    )
     bounds = {"t_f": (float(numpy.sqrt(straight)), float(numpy.sqrt(4 * straight)))}
     for name in scenario.problem.design_variables:
         if name.startswith("control."):

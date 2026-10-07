@@ -241,6 +241,16 @@ def test_the_wire_designed_for_the_ideal_bead_is_the_cycloid():
     )
 
 
+def test_the_length_bounds_follow_the_wire_s_own_target():
+    """Another end of the wire, another straight line to bound the length by."""
+    from gemseo_tempo.problems.brachistochrone.wire import wire_bounds
+
+    straight = numpy.hypot(2.0, -1.0)
+    lower, upper = wire_bounds(create_wire_scenario(target=(2.0, -1.0)))["t_f"]
+    assert lower == pytest.approx(numpy.sqrt(straight))
+    assert upper == pytest.approx(numpy.sqrt(4.0 * straight))
+
+
 def test_the_start_of_the_wire_is_regular():
     """Released from rest, every rate has its limit and so does its gradient."""
     import jax

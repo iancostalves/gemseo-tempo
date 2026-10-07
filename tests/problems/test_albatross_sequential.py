@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import logging
+import math
 
 import pytest
 
@@ -123,6 +124,17 @@ def test_the_two_sizing_routes_pick_different_birds(simultaneous):
     assert cruise["wing_area"] < dynamics["wing_area"]
 
 
+def test_a_cycle_that_does_not_close_scores_infinity():
+    """One iteration closes no cycle, and its objective is not passed off.
+
+    An infeasible solve still reports the objective of its least infeasible
+    point, and that number depends on the machine's rounding: it is what
+    once made the manoeuvre wing look better than the co-designed one.
+    """
+    assert minimum_wind(None, SIZE, max_iter=1) == math.inf
+    assert cross_country_time(None, SIZE, max_iter=1) == math.inf
+
+
 def test_co_design_beats_both_sizing_routes_on_both_missions(simultaneous):
     """Neither merit reproduces the co-design wing, on either mission.
 
@@ -173,8 +185,12 @@ def test_sizing_for_the_wrong_thing_costs_a_great_deal(simultaneous):
 
 
 def test_the_whole_route_reports_every_step():
-    """The result carries what was measured, what was chosen, and the outcome."""
-    result = sequential_codesign(size=8, relative_step=0.1, max_iter=250)
+    """The result carries what was measured, what was chosen, and the outcome.
+
+    On ten intervals, not eight: on eight, the chosen wing's cycle never
+    closes, and the wind it reported wandered with the iteration budget.
+    """
+    result = sequential_codesign(size=SIZE, relative_step=0.1, max_iter=300)
     assert set(result.sensitivities) == {"glide_ratio", "mass", "cl_max"}
     assert set(result.wing) == set(WING_BOUNDS)
     assert 4.0 < result.minimum_wind < 20.0

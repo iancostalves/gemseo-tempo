@@ -102,7 +102,8 @@ def _write_json(name: str, payload) -> Path:
     """
     path = DATA / name
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=1), encoding="utf-8")
+    # Ending in a newline, as the end-of-file hook requires.
+    path.write_text(json.dumps(payload, indent=1) + "\n", encoding="utf-8")
     print(f"  {name}")
     return path
 

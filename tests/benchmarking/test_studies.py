@@ -249,6 +249,21 @@ def test_the_transcription_figure_draws_a_level_for_the_gridless_one():
     assert axes[0].get_xscale() == "log"
 
 
+def test_the_reference_solve_is_drawn_below_the_errors_not_dropped():
+    """A zero error, the reference's own, is drawn a decade below the rest."""
+    rows = [
+        {"transcription": "shooting", "size": 10, "error": 1e-2, "seconds": 1.0},
+        {"transcription": "shooting", "size": 20, "error": 0.0, "seconds": 2.0},
+    ]
+    axes = plot_transcriptions(rows)
+    line, marker = axes[0].lines
+    assert list(line.get_ydata()) == [1e-2, 1e-3]
+    assert list(marker.get_xdata()) == [20]
+    assert list(marker.get_ydata()) == [1e-3]
+    # The time panel is untouched.
+    assert len(axes[1].lines) == 1
+
+
 def test_the_transcription_figure_draws_on_given_axes_and_skips_the_unconverged():
     """An indirect solve that did not converge is left out altogether."""
     import matplotlib.pyplot as plt

@@ -114,7 +114,10 @@ def plot_transcriptions(rows, axes=None):
     indirect one has no grid to refine, its accuracy being the
     integrator's, so it is a single level drawn across the whole range.
     A solve that did not meet its constraints is left out: its answer is
-    not an answer to the problem.
+    not an answer to the problem. Where there is no closed form, the
+    errors are measured against the best solve, whose own error is zero;
+    a logarithmic axis cannot show zero, so that point is drawn a decade
+    below the smallest positive error, as a hollow downward triangle.
 
     Parameters
     ----------
@@ -133,6 +136,8 @@ def plot_transcriptions(rows, axes=None):
     if axes is None:
         _, axes = plt.subplots(1, 2, figsize=(9.0, 3.6))
     sizes = sorted({row["size"] for row in rows if row["size"] is not None})
+    positive = [row["error"] for row in rows if row["error"] > 0.0]
+    floor = 0.1 * min(positive, default=1.0)
     for name, color in TRANSCRIPTION_COLORS.items():
         chosen = [
             row for row in rows if row["transcription"] == name and row.get("met", True)
@@ -151,13 +156,27 @@ def plot_transcriptions(rows, axes=None):
                 )
                 continue
             chosen = sorted(chosen, key=lambda row: row["size"])
+            values = [row[key] for row in chosen]
+            if key == "error":
+                values = [value if value > 0.0 else floor for value in values]
             axis.plot(
                 [row["size"] for row in chosen],
-                [row[key] for row in chosen],
+                values,
                 marker="o",
                 color=color,
                 label=name,
             )
+            reference = [row["size"] for row in chosen if row["error"] == 0.0]
+            if key == "error" and reference:
+                axis.plot(
+                    reference,
+                    [floor] * len(reference),
+                    linestyle="none",
+                    marker="v",
+                    markersize=9,
+                    markerfacecolor="white",
+                    color=color,
+                )
     for axis, label in zip(
         axes, ("relative error of the optimum", "wall time (s)"), strict=True
     ):

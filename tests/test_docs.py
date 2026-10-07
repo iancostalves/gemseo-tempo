@@ -233,6 +233,8 @@ def test_every_variable_the_pages_mention_is_declared():
     import re
     import sys
 
+    # The extension is built on docutils, which only the doc extras install.
+    pytest.importorskip("docutils")
     sys.path.insert(0, str(DOCS / "_ext"))
     from tempo_myst import registry_label
     from tempo_myst import walk_registries
