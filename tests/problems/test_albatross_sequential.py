@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import math
 
+import numpy
 import pytest
 
 from gemseo_tempo.problems.albatross import create_codesign_optimization
@@ -26,6 +27,7 @@ from gemseo_tempo.problems.albatross.problem import WING_BOUNDS
 from gemseo_tempo.problems.albatross.sequential import CRUISE_WEIGHTS
 from gemseo_tempo.problems.albatross.sequential import DYNAMICS_WEIGHTS
 from gemseo_tempo.problems.albatross.sequential import Sensitivity
+from gemseo_tempo.problems.albatross.sequential import _closed
 from gemseo_tempo.problems.albatross.sequential import compare_sizing_routes
 from gemseo_tempo.problems.albatross.sequential import cross_country_time
 from gemseo_tempo.problems.albatross.sequential import glide_ratio
@@ -51,26 +53,64 @@ MEASURED = {
 """Elasticities measured at ``size=12``, so the tests below need not re-run them."""
 
 
-def _simultaneous_wing():
-    """Return the wing the simultaneous co-design run settles on.
-
-    Returns
-    -------
-    dict
-        The wing area, span and section.
-    """
-    _, gemseo_scenario = create_codesign_optimization(size=SIZE)
-    gemseo_scenario.execute(algo_name="SLSQP", max_iter=600)
-    optimum = gemseo_scenario.optimization_result.x_opt_as_dict
-    return {name: float(optimum["constant." + name][0]) for name in WING_BOUNDS}
+def _solve(gemseo_scenario, max_iter, start=None):
+    """Run SLSQP, optionally from a given design, and return the result."""
+    if start:
+        current = gemseo_scenario.design_space.get_current_value(as_dict=True)
+        gemseo_scenario.design_space.set_current_value(
+            {
+                **current,
+                **{
+                    name: numpy.reshape(value, numpy.shape(current[name]))
+                    for name, value in start.items()
+                    if name in current
+                },
+            }
+        )
+    gemseo_scenario.execute(algo_name="SLSQP", max_iter=max_iter)
+    return gemseo_scenario.optimization_result
 
 
 @pytest.fixture(scope="module")
-def simultaneous():
+def codesign():
+    """Return the best wind and wing of optimizing everything at once.
+
+    Co-design is started from the default cycle and from each sizing route's
+    own answer, its wing and the cycle flown on it, the best counting, as
+    the design-strategy study on the albatross page does. A single start is
+    not enough on ten intervals: the problem has many local optima there,
+    and which one SLSQP reaches depends on the machine's rounding. Measured:
+    with AVX2 code, the wing sized for the manoeuvre closes a cycle at
+    6.46 m/s; with AVX-512 code it closes none; and co-design from the
+    default start reaches 8.72 m/s on both.
+
+    Returns
+    -------
+    tuple
+        The minimum wind, and the wing area, span and section.
+    """
+    candidates = []
+    scenario, gemseo_scenario = create_codesign_optimization(size=SIZE)
+    result = _solve(gemseo_scenario, 600)
+    candidates.append((_closed(scenario, gemseo_scenario), result))
+    for weights in (CRUISE_WEIGHTS, DYNAMICS_WEIGHTS):
+        wing = size_the_wing(weights)
+        _, route = create_codesign_optimization(
+            size=SIZE, design=wing, design_names=("w_ref",)
+        )
+        flown = _solve(route, 500).x_opt_as_dict
+        scenario, gemseo_scenario = create_codesign_optimization(size=SIZE, design=wing)
+        result = _solve(gemseo_scenario, 600, start=flown)
+        candidates.append((_closed(scenario, gemseo_scenario), result))
+    wind, result = min(candidates, key=lambda candidate: candidate[0])
+    optimum = result.x_opt_as_dict
+    return wind, {name: float(optimum["constant." + name][0]) for name in WING_BOUNDS}
+
+
+@pytest.fixture(scope="module")
+def simultaneous(codesign):
     """Return the minimum wind found by optimizing everything at once."""
-    _, gemseo_scenario = create_codesign_optimization(size=SIZE)
-    gemseo_scenario.execute(algo_name="SLSQP", max_iter=600)
-    return float(gemseo_scenario.optimization_result.f_opt)
+    return codesign[0]
 
 
 def test_the_mission_cares_most_about_gliding():
@@ -135,7 +175,7 @@ def test_a_cycle_that_does_not_close_scores_infinity():
     assert cross_country_time(None, SIZE, max_iter=1) == math.inf
 
 
-def test_co_design_beats_both_sizing_routes_on_both_missions(simultaneous):
+def test_co_design_beats_both_sizing_routes_on_both_missions(codesign):
     """Neither merit reproduces the co-design wing, on either mission.
 
     This is the argument for optimizing the wing and the cycle together,
@@ -143,14 +183,15 @@ def test_co_design_beats_both_sizing_routes_on_both_missions(simultaneous):
     close on minimum wind, which is a cruise-like objective, and loses more
     on the crossing. Sizing for the manoeuvre loses heavily on both.
     """
-    reference_time = cross_country_time(_simultaneous_wing(), SIZE, 500)
+    simultaneous, codesigned = codesign
+    reference_time = cross_country_time(codesigned, SIZE, 500)
     for weights in (CRUISE_WEIGHTS, DYNAMICS_WEIGHTS):
         wing = size_the_wing(weights)
         assert minimum_wind(wing, SIZE, 500) > simultaneous
         assert cross_country_time(wing, SIZE, 500) > reference_time
 
 
-def test_the_sizing_merit_can_only_land_on_a_corner():
+def test_the_sizing_merit_can_only_land_on_a_corner(codesign):
     """No weighting reaches the co-design wing, and here is why.
 
     The vehicle merit is close to linear in the normalized quantities over
@@ -169,7 +210,7 @@ def test_the_sizing_merit_can_only_land_on_a_corner():
     for area in areas:
         assert min(abs(area - lower), abs(area - upper)) < 1e-3
     # The co-design wing does not.
-    interior = _simultaneous_wing()["wing_area"]
+    interior = codesign[1]["wing_area"]
     assert lower + 1e-3 < interior < upper - 1e-3
 
 
