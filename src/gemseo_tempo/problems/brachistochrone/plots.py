@@ -251,7 +251,7 @@ def plot_gradient_cost(n_design, ad_seconds, fd_seconds, axes=None):
     ad_seconds
         The time for one reverse-mode gradient, at each dimension.
     fd_seconds
-        The time for one central-difference gradient, at each dimension.
+        The time for one finite-difference gradient, at each dimension.
     axes
         The axis to draw on; a new one when omitted.
 

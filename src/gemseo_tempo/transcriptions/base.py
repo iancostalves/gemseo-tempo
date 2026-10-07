@@ -56,6 +56,9 @@ STATE_PREFIX = "state."
 COSTATE_PREFIX = "costate."
 """The grammar prefix of initial-costate design variables (indirect)."""
 
+MULTIPLIER_PREFIX = "multiplier."
+"""The grammar prefix of the multipliers of terminal equalities (indirect)."""
+
 TRAJECTORY_PREFIX = "trajectory."
 """The grammar prefix of timeseries on the save grid."""
 

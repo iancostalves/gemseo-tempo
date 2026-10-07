@@ -1,0 +1,36 @@
+{
+ "factor": -2.0,
+ "design_sample": 64,
+ "check_sample": 2000,
+ "designs": {
+  "deterministic": {
+   "objective": -77.03848841257076,
+   "nominal": 77.03848841257076,
+   "mean": 77.0375471749286,
+   "std": 2.14299817183255,
+   "p05": 73.82052294961521,
+   "p95": 80.78541601672852
+  },
+  "robust": {
+   "objective": -74.5539795244489,
+   "met": true,
+   "compile_seconds": 53.02878039999996,
+   "seconds": 1699.879346919999,
+   "calls": 150,
+   "nominal": 76.15182698000038,
+   "mean": 76.77163991754931,
+   "std": 1.3854092816778705,
+   "p05": 75.65311893191745,
+   "p95": 79.17158302047676
+  }
+ },
+ "gradient_cost": {
+  "n_design": 82,
+  "evaluation_seconds": 1.5835532780001813,
+  "ad_seconds": 6.665405695999652,
+  "ad_route": "reverse, RecursiveCheckpoint",
+  "fd_seconds": 49.49223047000123,
+  "fd_variant": "batched",
+  "fd_step": 1e-08
+ }
+}

@@ -362,6 +362,53 @@ def taylor(propagation: Propagation, second_order: bool = False) -> Estimate:
     )
 
 
+def finite_differences(
+    propagation: Propagation, relative_step: float = 1e-6
+) -> Propagation:
+    """Return the same propagation with its derivatives taken by differencing.
+
+    The comparison automatic differentiation is judged against. Central
+    differences cost two evaluations per uncertain variable at every point
+    where a derivative is wanted, against one reverse pass for all of them,
+    and they are accurate only to the square of a step that has to be
+    small against the variable's spread yet large against the solver's
+    noise, which an adaptive integrator does not make easy.
+
+    Parameters
+    ----------
+    propagation
+        The propagation, whose own derivatives, if any, are ignored.
+    relative_step
+        The step, as a fraction of each variable's standard deviation.
+
+    Returns
+    -------
+    Propagation
+        The propagation, with a finite-difference Jacobian.
+    """
+    deviations = propagation.standard_deviations
+    steps = relative_step * numpy.where(deviations > 0.0, deviations, 1.0)
+    dimension = propagation.dimension
+
+    def jacobian(sample):
+        sample = numpy.asarray(sample, dtype=float)
+        shifted = numpy.repeat(sample, 2 * dimension, axis=0)
+        for index in range(dimension):
+            shifted[2 * index :: 2 * dimension, index] += steps[index]
+            shifted[2 * index + 1 :: 2 * dimension, index] -= steps[index]
+        values = numpy.asarray(propagation.evaluate(shifted)).reshape(
+            len(sample), 2 * dimension
+        )
+        return (values[:, 0::2] - values[:, 1::2]) / (2.0 * steps)
+
+    return Propagation(
+        evaluate=propagation.evaluate,
+        space=propagation.space,
+        names=propagation.names,
+        jacobian=jacobian,
+    )
+
+
 def _hessian_points(point, deviations) -> numpy.ndarray:
     """Return the points at which the gradient is differenced.
 
@@ -641,6 +688,7 @@ __all__ = [
     "Comparison",
     "Estimate",
     "Propagation",
+    "finite_differences",
     "from_scenario",
     "monte_carlo",
     "polynomial_chaos",

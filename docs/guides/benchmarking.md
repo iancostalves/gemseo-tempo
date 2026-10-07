@@ -126,8 +126,9 @@ Sprint 9 found the disciplines were never JIT-compiled and reported the fix
 as a single speedup number. That conflates two costs which scale
 differently: compilation grows with the program, the saving is per
 evaluation. So three times are measured on each problem, and from them the
-**crossover**, the evaluations needed before compiling has repaid itself —
-see the Optimization section of each problem's own page for its numbers.
+**crossover**, the evaluations needed before compiling has repaid itself.
+Each problem's own page measures what compiling the function and each of
+its Jacobians costs, in its Differentiation section.
 The answer is the same everywhere measured so far: compiling pays within
 single-digit evaluations, against the dozens or hundreds any optimization
 makes.

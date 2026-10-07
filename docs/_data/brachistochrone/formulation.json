@@ -1,0 +1,53 @@
+{
+ "objective": "descent_time",
+ "maximize": false,
+ "design_variables": [
+  {
+   "name": "state.x",
+   "size": 19,
+   "lower_bound": -10.0,
+   "upper_bound": 10.0
+  },
+  {
+   "name": "state.y",
+   "size": 19,
+   "lower_bound": -10.0,
+   "upper_bound": 10.0
+  },
+  {
+   "name": "state.v",
+   "size": 20,
+   "lower_bound": 0.0,
+   "upper_bound": 62.6418390534633
+  },
+  {
+   "name": "control.gamma",
+   "size": 21,
+   "lower_bound": 0.0,
+   "upper_bound": 1.5707963267948966
+  },
+  {
+   "name": "t_f",
+   "size": 1,
+   "lower_bound": 0.05,
+   "upper_bound": 10.0
+  }
+ ],
+ "constraints": [
+  {
+   "name": "constraint.defect.x",
+   "kind": "eq",
+   "size": 20
+  },
+  {
+   "name": "constraint.defect.y",
+   "kind": "eq",
+   "size": 20
+  },
+  {
+   "name": "constraint.defect.v",
+   "kind": "eq",
+   "size": 20
+  }
+ ]
+}

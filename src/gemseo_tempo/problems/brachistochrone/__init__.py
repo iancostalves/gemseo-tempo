@@ -29,6 +29,8 @@ from gemseo_tempo.problems.brachistochrone.problem import optimal_path_angle
 from gemseo_tempo.problems.brachistochrone.problem import simulate_guess
 from gemseo_tempo.problems.brachistochrone.reference import cycloid_time
 from gemseo_tempo.problems.brachistochrone.reference import reference_time
+from gemseo_tempo.problems.brachistochrone.wire import create_wire_optimization
+from gemseo_tempo.problems.brachistochrone.wire import create_wire_scenario
 
 __all__ = [
     "GRAVITY",
@@ -39,6 +41,8 @@ __all__ = [
     "create_optimization",
     "create_scenario",
     "create_state_space",
+    "create_wire_optimization",
+    "create_wire_scenario",
     "cycloid_time",
     "optimal_path_angle",
     "reference_time",

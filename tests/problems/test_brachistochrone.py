@@ -27,6 +27,8 @@ from gemseo_tempo.problems.brachistochrone import Guess
 from gemseo_tempo.problems.brachistochrone import create_optimization
 from gemseo_tempo.problems.brachistochrone import create_scenario
 from gemseo_tempo.problems.brachistochrone import create_state_space
+from gemseo_tempo.problems.brachistochrone import create_wire_optimization
+from gemseo_tempo.problems.brachistochrone import create_wire_scenario
 from gemseo_tempo.problems.brachistochrone import cycloid_time
 from gemseo_tempo.problems.brachistochrone import optimal_path_angle
 from gemseo_tempo.problems.brachistochrone import reference_time
@@ -64,6 +66,16 @@ def test_variant_constants():
     assert variant_constants("drag")["k_over_m"] > 0.0
     with pytest.raises(ValueError, match="Unknown variant"):
         variant_constants("rocket")
+
+
+def test_constants_are_laid_over_the_variant():
+    scenario = create_scenario(
+        transcription=SingleShooting(), variant="drag", constants={"mu": 0.05}
+    )
+    assert scenario.definition["constants"] == {
+        **variant_constants("drag"),
+        "mu": 0.05,
+    }
 
 
 def test_ideal_dynamics_are_the_frictionless_ones():
@@ -218,3 +230,50 @@ def test_analytic_path_angle_is_the_stationary_point():
     best = optimal_path_angle(0.0, states, costates, theta)["gamma"]
     assert abs(float(jax.grad(hamiltonian)(float(best)))) < 1e-9
     assert jnp.isfinite(best)
+
+
+# ------------------------------------------------------------------ wire
+
+
+def test_the_wire_designed_for_the_ideal_bead_is_the_cycloid():
+    assert solve(create_wire_optimization(size=20), 300) == pytest.approx(
+        cycloid_time(), rel=1e-6
+    )
+
+
+def test_the_length_bounds_follow_the_wire_s_own_target():
+    """Another end of the wire, another straight line to bound the length by."""
+    from gemseo_tempo.problems.brachistochrone.wire import wire_bounds
+
+    straight = numpy.hypot(2.0, -1.0)
+    lower, upper = wire_bounds(create_wire_scenario(target=(2.0, -1.0)))["t_f"]
+    assert lower == pytest.approx(numpy.sqrt(straight))
+    assert upper == pytest.approx(numpy.sqrt(4.0 * straight))
+
+
+def test_the_start_of_the_wire_is_regular():
+    """Released from rest, every rate has its limit and so does its gradient."""
+    import jax
+
+    from gemseo_tempo.problems.brachistochrone.wire import wire_rhs
+
+    states = {"x": 0.0, "y": 0.0, "v": 0.0, "elapsed": 0.0}
+
+    def rate(mu):
+        theta = {"g": GRAVITY, "mu": mu, "k_over_m": 0.05}
+        return wire_rhs(0.0, states, {"gamma": 1.2}, theta)["elapsed"]
+
+    push = GRAVITY * (numpy.sin(1.2) - 0.1 * numpy.cos(1.2))
+    assert float(rate(0.1)) == pytest.approx(numpy.sqrt(2.0 / push))
+    assert numpy.isfinite(float(jax.grad(rate)(0.1)))
+
+
+def test_the_physics_changes_the_time_along_a_wire_but_not_where_it_ends():
+    scenario = create_wire_scenario(size=10)
+    defaults = dict(scenario.problem.input_defaults)
+    ideal = scenario.problem.jax_function(defaults)
+    defaults["constant.mu"] = numpy.array([0.1])
+    rough = scenario.problem.jax_function(defaults)
+    for name in ("constraint.final.x", "constraint.final.y"):
+        assert float(rough[name][0]) == pytest.approx(float(ideal[name][0]))
+    assert float(rough["descent_time"][0]) > float(ideal["descent_time"][0])

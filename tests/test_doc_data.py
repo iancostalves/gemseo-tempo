@@ -34,6 +34,8 @@ from pathlib import Path
 import numpy
 import pytest
 
+from gemseo_tempo.problems.albatross.model import REGISTRY as ALBATROSS_REGISTRY
+from gemseo_tempo.problems.brachistochrone import REGISTRY as BRACHISTOCHRONE_REGISTRY
 from gemseo_tempo.problems.brachistochrone import cycloid_time
 from gemseo_tempo.problems.brachistochrone import reference_time
 from gemseo_tempo.problems.sail.model import REGISTRY as SAIL_REGISTRY
@@ -98,33 +100,70 @@ def test_the_stored_trajectories_are_self_consistent():
         assert float(arrays["y"][-1]) == pytest.approx(2.0, abs=1e-3)
 
 
-def test_the_convergence_study_refines_towards_the_cycloid():
-    study = _load("brachistochrone/convergence.json")
-    assert study["exact"] == pytest.approx(cycloid_time(), rel=1e-9)
-    for label, errors in study["errors"].items():
-        assert len(errors) == len(study["sizes"]), label
-        assert all(error >= 0.0 for error in errors), label
+def test_every_transcription_reaches_the_cycloid():
+    """The benchmark's reference is the closed form, and every solve meets it.
 
-
-def test_ad_beats_finite_differences_and_the_gap_grows():
-    """The measurement the transcription guide's argument turns on.
-
-    Not a story that could plausibly reverse: reverse-mode AD costs one
-    pass regardless of dimension, central differences cost one extra pass
-    per design variable, so growing the design and finding AD still
-    faster, and by more, is the whole claim.
+    Indirect shooting included: it solves the necessary conditions rather
+    than the problem, and must land on the same curve.
     """
-    records = _load("brachistochrone/ad_vs_fd.json")
+    study = _load("brachistochrone/transcriptions.json")
+    assert study["reference"] == pytest.approx(cycloid_time(), rel=1e-9)
+    names = {row["transcription"] for row in study["rows"]}
+    assert names == {"shooting", "collocation", "indirect"}
+    for row in study["rows"]:
+        assert row["met"], row
+        assert row["error"] < 1e-5, row
+
+
+@pytest.mark.parametrize("problem", ["sail", "albatross"])
+def test_the_direct_transcriptions_agree_where_there_is_no_closed_form(problem):
+    """Shooting and collocation each converge, to answers within a few percent.
+
+    The indirect row is recorded whether or not it converged, since where it
+    does not the page says so and why.
+    """
+    study = _load(f"{problem}/transcriptions.json")
+    for name in ("shooting", "collocation"):
+        met = [
+            row for row in study["rows"] if row["transcription"] == name and row["met"]
+        ]
+        assert met, f"no {name} solve converged; {REGENERATE}"
+        assert max(row["error"] for row in met) < 0.05
+    assert [row for row in study["rows"] if row["transcription"] == "indirect"]
+
+
+def test_ad_beats_finite_differences_in_the_loop_and_the_gap_grows():
+    """The measurement the robust design's argument turns on.
+
+    Not a story that could plausibly reverse: a reverse pass costs a few
+    evaluations whatever the size of the design, and finite differences
+    cost one more per design variable, so refining the wire and finding
+    AD still faster, and by more, is the whole claim.
+    """
+    records = _load("brachistochrone/robust.json")["gradient_cost"]
     sizes = [record["n_design"] for record in records]
     assert sizes == sorted(sizes), REGENERATE
-    for record in records:
-        assert record["ad_seconds"] < record["fd_seconds"], (
-            f"AD was not faster at n_design={record['n_design']}; {REGENERATE}"
-        )
     ratio = lambda record: record["fd_seconds"] / record["ad_seconds"]  # noqa: E731
     assert ratio(records[-1]) > ratio(records[0]), (
         f"the AD advantage did not grow with dimension; {REGENERATE}"
     )
+    assert ratio(records[-1]) > 1.0
+
+
+def test_the_robust_wire_is_the_same_by_either_gradient():
+    """The gradient changes what the loop costs, not where it ends."""
+    designs = _load("brachistochrone/robust.json")["designs"]
+    assert all(design["met"] for design in designs.values()), REGENERATE
+    assert designs["robust_fd"]["objective"] == pytest.approx(
+        designs["robust"]["objective"], rel=1e-4
+    )
+    # The loop runs faster with AD, which compiles for longer, and at this
+    # size the batched differences win the solve once that is counted.
+    ad, fd = designs["robust"], designs["robust_fd"]
+    assert ad["seconds"] < fd["seconds"]
+    assert ad["compile_seconds"] > fd["compile_seconds"]
+    total = lambda design: design["seconds"] + design["compile_seconds"]  # noqa: E731
+    assert total(fd) < total(ad)
 
 
 # ------------------------------------------------------------------- sail
@@ -169,23 +208,44 @@ def test_the_channel_study_is_monotone():
         assert record["across"] <= record["half_width"] + 1.0
 
 
-def test_the_uncertain_variables_are_the_ones_the_registry_declares():
-    """A study of variables the registry no longer has is a stale study."""
-    estimators = _load("sail/estimators.json")
-    assert estimators["reference"]["n_evaluations"] > 0
-    assert uncertain_names(SAIL_REGISTRY) == ["wind_scale", "wind_veer"]
+REGISTRIES = {
+    "brachistochrone": BRACHISTOCHRONE_REGISTRY,
+    "sail": SAIL_REGISTRY,
+    "albatross": ALBATROSS_REGISTRY,
+}
+"""The registry each problem's uncertain variables are read from."""
 
 
-def test_the_estimators_are_scored_against_the_same_reference():
-    estimators = _load("sail/estimators.json")
-    reference = estimators["reference"]
-    for record in estimators["estimates"]:
-        # The error each one reports is the one the stored means imply.
+@pytest.mark.parametrize("problem", list(REGISTRIES))
+def test_each_propagation_is_scored_against_its_reference(problem):
+    """The errors, costs and variables the tables show are the stored ones.
+
+    A study of variables the registry no longer has is a stale study; an
+    error is the difference the stored means imply, in reference deviations;
+    and a finite-difference gradient is charged the two evaluations per
+    variable it takes, where a reverse pass is charged one.
+    """
+    study = _load(f"{problem}/propagation.json")
+    assert study["names"] == uncertain_names(REGISTRIES[problem]), REGENERATE
+    reference = study["reference"]
+    dimension = len(study["names"])
+    for name, record in study["estimates"].items():
         expected = (record["mean"] - reference["mean"]) / reference[
             "standard_deviation"
         ]
         assert record["mean_error"] == pytest.approx(expected, rel=1e-9)
-        assert record["cost"] == record["n_evaluations"] + record["n_gradients"]
+        per_gradient = 2 * dimension if name.endswith("_fd") else 1
+        assert record["model_calls"] == (
+            record["n_evaluations"] + per_gradient * record["n_gradients"]
+        )
+
+
+@pytest.mark.parametrize("problem", list(REGISTRIES))
+def test_vectorized_sampling_is_the_same_sample_only_faster(problem):
+    estimates = _load(f"{problem}/propagation.json")["estimates"]
+    vmapped, looped = estimates["sampling_vmapped"], estimates["sampling_looped"]
+    assert vmapped["mean"] == pytest.approx(looped["mean"], rel=1e-9)
+    assert vmapped["seconds"] < looped["seconds"]
 
 
 def test_the_margin_study_reaches_a_probabilistic_design():
@@ -198,6 +258,18 @@ def test_the_margin_study_reaches_a_probabilistic_design():
     )
     for record in study["designs"]:
         assert 0.0 <= record["reliability"] <= 1.0
+    # A wider margin is a tighter channel, which cannot be sailed faster.
+    margins = [
+        record for record in study["designs"] if not record["name"].startswith("P(")
+    ]
+    times = [record["objective"] for record in margins]
+    assert times == sorted(times), f"the margin study is not monotone; {REGENERATE}"
+    # The page says the chance constraint reaches its target and lands where
+    # the 50 m margin did.
+    chance = study["designs"][-1]
+    assert chance["reliability"] >= study["target"]
+    fifty = next(r for r in margins if r["name"] == "margin 50 m")
+    assert chance["objective"] == pytest.approx(fifty["objective"], abs=0.05)
 
 
 # -------------------------------------------------------------- albatross
@@ -229,24 +301,253 @@ def test_the_albatross_cycle_closes():
     )
 
 
-def test_the_energy_sweep_crosses_break_even():
-    """The finding the sweep exists for: below some wind, the cycle loses.
+def test_designing_the_wing_with_the_cycle_never_needs_more_wind():
+    """Co-design contains both other routes, so it cannot do worse than either.
 
-    The net has to change sign somewhere in the swept range, or the figure
-    has nothing to show.
+    Each is solved from the same guess, so a co-design that came out worse
+    would mean the solver stopped short, not that sizing first is better.
     """
-    sweep = _load("albatross/energy_sweep.json")
-    nets = [record["air_change"] for record in sweep]
-    assert min(nets) < 0.0 < max(nets), f"no break-even in the sweep; {REGENERATE}"
-    # And gradient work is what pays for it: zero wind extracts nothing.
-    calm = next(record for record in sweep if record["w_ref"] == 0.0)
-    assert calm["gradient_work"] == pytest.approx(0.0, abs=1e-6)
+    strategies = _load("albatross/design_strategies.json")
+    for shape in ("loop", "weave"):
+        codesign = strategies[f"{shape}_codesign"]["minimum_wind"]
+        for route in ("fixed", "sequential"):
+            assert codesign <= strategies[f"{shape}_{route}"]["minimum_wind"] + 1e-3
 
 
-def test_the_albatross_uncertainty_study_is_current():
-    from gemseo_tempo.problems.albatross.model import REGISTRY
+def test_every_mission_met_its_constraints():
+    missions = _load("albatross/missions.json")
+    for key, mission in missions.items():
+        if isinstance(mission, dict):
+            assert mission["met"], key
 
-    study = _load("albatross/uncertainty.json")
-    assert study["sobol"]["names"] == uncertain_names(REGISTRY)
-    assert study["screening"]["ranking"], REGENERATE
-    assert study["speedup"]["speedup"] > 1.0
+
+def test_the_upwind_leg_is_slower_than_its_bound():
+    """No track can beat the polar's best speed made good held all the way."""
+    upwind = _load("sail/upwind.json")
+    bound = _load("sail/vmg.json")["upwind"]["ideal_time"]
+    assert upwind["met"]
+    # One tack costs a few percent; a slower answer is a local optimum.
+    assert bound <= upwind["optimized"] < 1.04 * bound
+
+
+def test_the_re_flown_cycles_stay_on_their_nodes():
+    """Collocation never integrates between its nodes; the re-flight does.
+
+    Flying the optimal controls through a tight integrator is how the page
+    measures the discretization error, so the stored departures must be
+    small against the size of the cycle, and the flown cycle must still
+    close, or the figures drawn from it are of a different cycle.
+    """
+    checks = dict(_load("albatross/dense_check.json"))
+    for key, shape in _load("albatross/shapes.json").items():
+        if "dense_check" in shape:
+            checks[key] = shape["dense_check"]
+    for name, check in checks.items():
+        for state in ("x", "y", "h"):
+            scale = max(check["extent"][state], 10.0)
+            assert check["departure"][state] < 0.1 * scale, (name, state)
+        assert abs(check["closure"]["h"]) < 1.0, name
+
+
+@pytest.mark.parametrize("key", ["loop", "weave"])
+def test_each_stored_shape_is_the_shape_it_is_named_after(key):
+    """An O turns all the way round, and an S turns back.
+
+    Each stored cycle is the best of its starts, and more than one start
+    reaches it, so it is not a lucky one-off.
+    """
+    shape = _load("albatross/shapes.json")[key]
+    cycle = _load(f"albatross/cycle_{key}_dense.npz")
+    turned = float(cycle["psi"][-1] - cycle["psi"][0])
+    assert turned == pytest.approx(2.0 * numpy.pi if key == "loop" else 0.0, abs=0.05)
+    assert shape["minimum_wind"] == min(w for w in shape["winds"] if w is not None)
+    assert shape["at_best"] >= 2, REGENERATE
+
+
+@pytest.mark.parametrize("key", ["loop", "weave"])
+def test_staying_put_costs_wind(key):
+    """The nearer a cycle must end to where it started, the more wind it needs.
+
+    Each step of the continuation towards a hover starts from the one
+    before, so a step that needed less wind than the last would mean an
+    earlier step stopped short of its optimum.
+    """
+    steps = _load("albatross/shapes.json")[key]["hover"]
+    fractions = [step["fraction"] for step in steps]
+    winds = [step["minimum_wind"] for step in steps]
+    assert fractions == sorted(fractions, reverse=True)
+    assert all(
+        later >= 0.999 * earlier
+        for earlier, later in zip(winds, winds[1:], strict=False)
+    )
+
+
+def test_hong_et_al_are_replicated_by_the_shape_they_flew():
+    """Their heading closes without a turn: their cycle is an S.
+
+    Solved as an S, the minimum wind lands within a few percent of theirs
+    and has converged in the discretization.
+    """
+    study = _load("albatross/hong_2023.json")
+    weave = study["weave"]
+    assert abs(weave["difference"]) < 0.05, REGENERATE
+    coarse, fine = (run["minimum_wind"] for run in weave["runs"])
+    assert fine == pytest.approx(coarse, rel=0.01)
+
+
+def test_the_robust_cycle_trades_its_forecast_energy_for_less_spread():
+    """What the albatross page says the robust cycle buys, and with what."""
+    study = _load("albatross/robust.json")
+    deterministic, robust = (
+        study["designs"]["deterministic"],
+        study["designs"]["robust"],
+    )
+    assert robust["met"], REGENERATE
+    assert robust["nominal"] < deterministic["nominal"]
+    assert robust["std"] < 0.75 * deterministic["std"]
+    assert robust["p05"] > deterministic["p05"] + 1.0
+    cost = study["gradient_cost"]
+    assert cost["ad_seconds"] < cost["fd_seconds"]
+
+
+DIFFERENTIATED = ("brachistochrone", "sail", "albatross")
+"""The problems whose pages compare the ways of taking a Jacobian."""
+
+
+def _differentiation_records(problem):
+    study = _load(f"{problem}/differentiation.json")
+    return [record for records in study.values() for record in records]
+
+
+@pytest.mark.parametrize("problem", DIFFERENTIATED)
+def test_exact_jacobians_agree_and_differences_do_not(problem):
+    """Forward and reverse through the Direct adjoint agree to rounding.
+
+    The checkpointed variant is left out: on some albatross save grids its
+    batched reverse pass is off by percents, which the page reports.
+    """
+    for record in _differentiation_records(problem):
+        if record["mode"] in ("forward", "reverse"):
+            assert record["error"] < 1e-10, record
+        elif record["mode"] == "fd":
+            assert 1e-10 < record["error"] < 1e-2, record
+
+
+@pytest.mark.parametrize("problem", DIFFERENTIATED)
+def test_batched_differences_keep_pace_with_forward_mode(problem):
+    """Both push every input direction through the model in one batch.
+
+    So at their best, batched into one call, finite differences cost what
+    forward mode costs, within a factor of two either way, at every size;
+    what they give up is precision, which the test above checks.
+    """
+    compiled = [r for r in _differentiation_records(problem) if r["jit"]]
+    for record in compiled:
+        if record["mode"] == "fd":
+            forward = next(
+                r
+                for r in compiled
+                if r["mode"] == "forward"
+                and (r["n_inputs"], r["n_outputs"])
+                == (record["n_inputs"], record["n_outputs"])
+            )
+            assert 0.5 < record["seconds"] / forward["seconds"] < 2.0, record
+
+
+def test_checkpointed_reverse_leads_the_brachistochrone():
+    """Three outputs, three backward passes: the fastest at all sizes but one."""
+    compiled = [
+        r for r in _load("brachistochrone/differentiation.json")["inputs"] if r["jit"]
+    ]
+    sizes = sorted({r["n_inputs"] for r in compiled})
+    led = [
+        min((r for r in compiled if r["n_inputs"] == size), key=lambda r: r["seconds"])[
+            "mode"
+        ]
+        == "reverse_checkpointed"
+        for size in sizes
+    ]
+    assert led[-1]
+    assert sum(led) >= len(sizes) - 1
+
+
+@pytest.mark.parametrize("problem", DIFFERENTIATED)
+def test_reverse_compiles_slower_than_forward_than_the_function(problem):
+    """The page's reading of the compilation figure."""
+    for record in _differentiation_records(problem):
+        if record["jit"] and record["mode"] == "reverse":
+            forward = next(
+                r
+                for r in _differentiation_records(problem)
+                if r["jit"]
+                and r["mode"] == "forward"
+                and (r["n_inputs"], r["n_outputs"])
+                == (record["n_inputs"], record["n_outputs"])
+            )
+            assert record["compile_jacobian"] > forward["compile_jacobian"]
+            assert forward["compile_jacobian"] > forward["compile_function"]
+
+
+def test_forward_mode_wins_on_the_sail_in_time_and_in_memory():
+    """What the sail's differentiation section says of the two exact modes."""
+    records = _differentiation_records("sail")
+    for record in records:
+        if record["jit"] and record["mode"] == "reverse":
+            forward = next(
+                r
+                for r in records
+                if r["jit"]
+                and r["mode"] == "forward"
+                and (r["n_inputs"], r["n_outputs"])
+                == (record["n_inputs"], record["n_outputs"])
+            )
+            assert forward["seconds"] < record["seconds"]
+            assert forward["memory"] < record["memory"]
+
+
+def test_the_albatross_sweeps_say_what_its_page_says():
+    """Exact reverse never leads; checkpointed reverse is faster late, and wrong."""
+    records = _differentiation_records("albatross")
+    compiled = [r for r in records if r["jit"]]
+
+    def twin(record, mode):
+        return next(
+            r
+            for r in compiled
+            if r["mode"] == mode
+            and (r["n_inputs"], r["n_outputs"])
+            == (record["n_inputs"], record["n_outputs"])
+        )
+
+    for record in compiled:
+        if record["mode"] == "reverse":
+            # Never ahead of forward mode; level, at most, on the largest grid.
+            assert twin(record, "forward")["seconds"] < 1.05 * record["seconds"]
+    largest = max(r["n_inputs"] for r in compiled)
+    checkpointed = next(
+        r
+        for r in compiled
+        if r["mode"] == "reverse_checkpointed" and r["n_inputs"] == largest
+    )
+    assert checkpointed["seconds"] < twin(checkpointed, "forward")["seconds"]
+    assert (
+        max(r["error"] for r in compiled if r["mode"] == "reverse_checkpointed") > 1e-2
+    )
+
+
+def test_the_dynamics_alone_decide_the_cost_of_the_chain():
+    """Every choice of modes gives the same Jacobian; only the dynamics' costs."""
+    study = _load("albatross/chain_modes.json")
+    for chain in study["chains"]:
+        assert chain["error"] < 1e-10
+        assert chain["statics_seconds"] < 1e-2
+        assert chain["outputs_seconds"] < 1e-2
+    forward = [c for c in study["chains"] if c["modes"]["dynamics"] == "forward"]
+    reverse = [c for c in study["chains"] if c["modes"]["dynamics"] == "reverse"]
+    assert max(c["seconds"] for c in forward) < min(c["seconds"] for c in reverse)
+    assert max(c["memory"] for c in forward) < min(c["memory"] for c in reverse)
+    # Batched into one call, differences of the whole chain cost what the
+    # forward chains do, and give up digits for it.
+    fastest = min(c["seconds"] for c in forward)
+    assert 0.5 < study["fd"]["seconds"] / fastest < 2.0
+    assert study["fd"]["error"] > 1e-9

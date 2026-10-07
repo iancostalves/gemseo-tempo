@@ -45,6 +45,7 @@ asked for stays visible.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from dataclasses import field
 
@@ -190,13 +191,66 @@ def minimum_wind(
     Returns
     -------
     float
-        The minimum reference wind, in m/s.
+        The minimum reference wind, in m/s; infinite when no cycle is found
+        to close on this wing, see :func:`_closed`.
     """
-    _, gemseo_scenario = create_codesign_optimization(
+    scenario, gemseo_scenario = create_codesign_optimization(
         size=size, design=design, design_names=("w_ref",)
     )
     gemseo_scenario.execute(algo_name="SLSQP", max_iter=max_iter)
-    return float(gemseo_scenario.optimization_result.f_opt)
+    return _closed(scenario, gemseo_scenario)
+
+
+CLOSURE_TOLERANCE = 1e-3
+"""How far a constraint may miss, in its own units, for a cycle to have closed."""
+
+
+def _closed(scenario, gemseo_scenario) -> float:
+    """Return the optimum of a solved mission, if its cycle closed.
+
+    An optimizer that ends without meeting the constraints still reports an
+    objective, that of its least infeasible point, and that number is not a
+    wind or a time the bird achieves. Measured: on the wing sized for the
+    manoeuvre, no budget from 100 to 600 iterations closed a cycle, and the
+    figure reported was 22.8 m/s on one machine and 6.46 m/s on another,
+    the second better than the co-designed wing's. A wing on which no cycle
+    is found to close is worse than any on which one is, so it scores
+    infinity.
+
+    Closure is measured on the constraints themselves rather than read from
+    GEMSEO's flag, which called a cycle whose largest defect was 1.3e-4
+    infeasible.
+
+    Parameters
+    ----------
+    scenario
+        The dynamic scenario, for its constraints.
+    gemseo_scenario
+        Its GEMSEO scenario, executed.
+
+    Returns
+    -------
+    float
+        The objective, or infinity when a constraint misses by more than
+        :data:`CLOSURE_TOLERANCE`.
+    """
+    result = gemseo_scenario.optimization_result
+    problem = scenario.problem
+    outputs = problem.jax_function(
+        {
+            **problem.input_defaults,
+            **{
+                name: jnp.atleast_1d(value)
+                for name, value in result.x_opt_as_dict.items()
+            },
+        }
+    )
+    misses = [
+        jnp.max(jnp.abs(outputs[name])) if kind == "eq" else jnp.max(outputs[name])
+        for name, kind in problem.constraint_names
+    ]
+    closed = max((float(miss) for miss in misses), default=0.0) <= CLOSURE_TOLERANCE
+    return float(result.f_opt) if closed else math.inf
 
 
 CROSS_COUNTRY_WIND = 22.0
@@ -230,11 +284,12 @@ def cross_country_time(
     Returns
     -------
     float
-        The time to cover :data:`CROSS_COUNTRY_DISTANCE`, in s.
+        The time to cover :data:`CROSS_COUNTRY_DISTANCE`, in s; infinite
+        when no cycle is found to close, see :func:`_closed`.
     """
     from gemseo_tempo.problems.albatross.problem import create_energy_optimization
 
-    _, gemseo_scenario = create_energy_optimization(
+    scenario, gemseo_scenario = create_energy_optimization(
         size=size,
         w_ref=CROSS_COUNTRY_WIND,
         design=design,
@@ -242,7 +297,7 @@ def cross_country_time(
         target_distance=CROSS_COUNTRY_DISTANCE,
     )
     gemseo_scenario.execute(algo_name="SLSQP", max_iter=max_iter)
-    return float(gemseo_scenario.optimization_result.f_opt)
+    return _closed(scenario, gemseo_scenario)
 
 
 @dataclass
@@ -620,6 +675,7 @@ def misalignment_study(
 
 __all__ = [
     "VEHICLE_PARAMETERS",
+    "CLOSURE_TOLERANCE",
     "CROSS_COUNTRY_DISTANCE",
     "CROSS_COUNTRY_WIND",
     "SequentialResult",

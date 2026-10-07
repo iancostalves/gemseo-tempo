@@ -23,6 +23,8 @@ from gemseo import create_scenario
 from gemseo.algos.design_space import DesignSpace
 
 from gemseo_tempo.transcriptions.base import CONSTANT_PREFIX
+from gemseo_tempo.transcriptions.base import COSTATE_PREFIX
+from gemseo_tempo.transcriptions.base import MULTIPLIER_PREFIX
 from gemseo_tempo.transcriptions.base import T_FINAL
 
 if TYPE_CHECKING:
@@ -50,6 +52,7 @@ class BaseFormulationBuilder:
         bounds: dict[str, tuple[float, float]] | None = None,
         disciplines: Sequence | None = None,
         extra_constraints: Sequence[tuple[str, str]] = (),
+        objective: str | None = None,
     ) -> None:
         """Store the scenario.
 
@@ -86,8 +89,13 @@ class BaseFormulationBuilder:
         extra_constraints
             ``(output name, constraint type)`` pairs to wire in alongside
             the transcription's own.
+        objective
+            The output to optimize instead of the transcription's
+            objective, such as a statistic of it that one of the
+            ``disciplines`` computes.
         """
         self.scenario = scenario
+        self.objective = objective
         self.maximize = maximize
         self.bounds = dict(bounds or {})
         self.disciplines = list(disciplines) if disciplines is not None else None
@@ -113,6 +121,8 @@ class BaseFormulationBuilder:
 
         Explicit bounds win; otherwise the registry entry of the raw
         (unprefixed) name is used; otherwise the variable is unbounded.
+        Costates and multipliers are never bounded by the registry: the
+        costate of a state shares its name, not its range.
 
         Parameters
         ----------
@@ -128,7 +138,8 @@ class BaseFormulationBuilder:
             return self.bounds[name]
         registry = self.scenario.registry
         raw = name.rsplit(".", 1)[-1]
-        if registry is not None and raw in registry:
+        adjoint = name.startswith((COSTATE_PREFIX, MULTIPLIER_PREFIX))
+        if registry is not None and raw in registry and not adjoint:
             variable = registry[raw]
             return (
                 variable.lower_bound
@@ -146,14 +157,16 @@ class BaseFormulationBuilder:
         DesignSpace
             The design space, with defaults as initial values and bounds
             from the explicit ``bounds``, then the registry, then
-            unbounded.
+            unbounded. A default outside its bounds is moved onto the
+            nearer one, since the optimizer has to start inside them: a
+            guess built from physics, not from the box, can stray outside.
         """
         design_space = DesignSpace()
         defaults = self.scenario.problem.input_defaults
         specs = self.scenario.problem.design_variables
         for name in self._design_variable_names():
             lower, upper = self._bounds_of(name)
-            value = numpy.atleast_1d(numpy.asarray(defaults[name]))
+            value = numpy.clip(numpy.atleast_1d(defaults[name]), lower, upper)
             size = specs[name].size if name in specs else value.shape[0]
             design_space.add_variable(
                 name,
@@ -194,7 +207,7 @@ class BaseFormulationBuilder:
         )
         gemseo_scenario = create_scenario(
             disciplines,
-            objective_name=problem.objective_name,
+            objective_name=self.objective or problem.objective_name,
             design_space=self.create_design_space(),
             maximize_objective=self.maximize,
             **formulation_settings,

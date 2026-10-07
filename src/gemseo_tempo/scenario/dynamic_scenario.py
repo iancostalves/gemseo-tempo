@@ -65,6 +65,10 @@ class DynamicScenario:
     state_space: StateSpace
     """The dynamics model, kept so a solved trajectory can be read back."""
 
+    definition: dict
+    """Everything the problem was built from, bar the transcription, so it
+    can be built again under another one; see :meth:`retranscribe`."""
+
     def __init__(
         self,
         state_space: StateSpace,
@@ -78,7 +82,7 @@ class DynamicScenario:
         assembly: str = MONOLITHIC,
         registry: VariableRegistry | None = None,
         constants: Mapping[str, float] | None = None,
-        differentiation_method: str = REVERSE,
+        differentiation_method: str | Mapping[str, str] = REVERSE,
         t0: float = 0.0,
         t1: float = 1.0,
     ) -> None:
@@ -116,9 +120,12 @@ class DynamicScenario:
             ``"reverse"`` (default) or ``"forward"``. Must be compatible
             with the integrator adjoint: forward mode requires the Direct
             adjoint (see :func:`.check_adjoint_compatibility`). The
-            statics discipline of the split assembly always differentiates
+            statics discipline of the split assembly then differentiates
             in forward mode, being a cheap algebraic chain with more
-            outputs than inputs.
+            outputs than inputs. With the split assembly it may instead be
+            a mode per stage, ``{"statics": ..., "dynamics": ...,
+            "outputs": ...}``, since each stage's best mode follows its own
+            ratio of inputs to outputs; a stage left out keeps its default.
         t0
             The initial time.
         t1
@@ -128,20 +135,39 @@ class DynamicScenario:
         ------
         ValueError
             If the assembly is unknown, the transcription does not support
-            the split assembly, or the differentiation method is
-            incompatible with the integrator adjoint.
+            the split assembly, the differentiation method is incompatible
+            with the integrator adjoint, or modes per stage are asked of the
+            monolithic assembly or name an unknown stage or mode.
         """
         if assembly not in (self.MONOLITHIC, self.SPLIT):
             raise ValueError(f"Unknown assembly {assembly!r}.")
+        self.stage_methods = self._stage_methods(differentiation_method, assembly)
+        self.definition = {
+            "state_space": state_space,
+            "integrator": integrator,
+            "controls": tuple(controls),
+            "functionals": tuple(functionals),
+            "constraints": tuple(constraints),
+            "boundary": boundary,
+            "statics": statics,
+            "assembly": assembly,
+            "registry": registry,
+            "constants": dict(constants or {}),
+            "differentiation_method": differentiation_method,
+            "t0": t0,
+            "t1": t1,
+        }
         self.assembly = assembly
         self.registry = registry
         self.state_space = state_space
-        self.differentiation_method = differentiation_method
+        # The mode of the discipline that integrates, which is the one any
+        # monolithic wrapper built on this scenario differentiates in.
+        self.differentiation_method = self.stage_methods["dynamics"]
         self.transcription = (
             transcription if transcription is not None else SingleShooting()
         )
         self.statics = statics
-        integrator.check_differentiation_method(differentiation_method)
+        integrator.check_differentiation_method(self.differentiation_method)
         self.problem = self.transcription.transcribe(
             statics,
             state_space,
@@ -158,6 +184,70 @@ class DynamicScenario:
             self.disciplines = [self._build_monolithic()]
         else:
             self.disciplines = self._build_split()
+
+    STAGES = ("statics", "dynamics", "outputs")
+    """The stages of the split assembly, in execution order."""
+
+    @classmethod
+    def _stage_methods(cls, method, assembly: str) -> dict[str, str]:
+        """Return the differentiation mode of each stage.
+
+        Parameters
+        ----------
+        method
+            One mode for every ODE-bearing stage, or a mode per stage.
+        assembly
+            The assembly strategy.
+
+        Returns
+        -------
+        dict
+            The mode of each of :attr:`STAGES`.
+
+        Raises
+        ------
+        ValueError
+            If modes per stage are asked of the monolithic assembly, or name
+            an unknown stage or mode.
+        """
+        if isinstance(method, str):
+            return {"statics": FORWARD, "dynamics": method, "outputs": method}
+        if assembly != cls.SPLIT:
+            msg = "A differentiation mode per stage needs the split assembly."
+            raise ValueError(msg)
+        unknown = sorted(set(method) - set(cls.STAGES))
+        if unknown:
+            msg = f"Unknown stages {unknown}; the stages are {list(cls.STAGES)}."
+            raise ValueError(msg)
+        methods = {"statics": FORWARD, "dynamics": REVERSE, "outputs": REVERSE}
+        methods.update(method)
+        invalid = sorted(
+            stage for stage, mode in methods.items() if mode not in (FORWARD, REVERSE)
+        )
+        if invalid:
+            msg = f"Unknown differentiation modes for {invalid}."
+            raise ValueError(msg)
+        return methods
+
+    def retranscribe(self, transcription, **changes) -> DynamicScenario:
+        """Return the same problem under another transcription.
+
+        Parameters
+        ----------
+        transcription
+            The transcription to build the problem with.
+        **changes
+            Any part of :attr:`definition` to replace, such as the
+            boundary or the constants a warm start comes with.
+
+        Returns
+        -------
+        DynamicScenario
+            The new scenario.
+        """
+        return DynamicScenario(
+            **{**self.definition, "transcription": transcription, **changes}
+        )
 
     def _build_monolithic(self) -> JAXDiscipline:
         """Build the single differentiated discipline.
@@ -224,15 +314,18 @@ class DynamicScenario:
                         for name in input_names
                     },
                     differentiation_method=(
-                        JAXDiscipline.DifferentiationMethod(FORWARD)
+                        JAXDiscipline.DifferentiationMethod(
+                            self.stage_methods["statics"]
+                        )
                     ),
                     name="statics",
                 )
             )
-        for piece, name, method in (
-            (problem.dynamics, "dynamics", self.differentiation_method),
-            (problem.outputs, "outputs", self.differentiation_method),
+        for piece, name in (
+            (problem.dynamics, "dynamics"),
+            (problem.outputs, "outputs"),
         ):
+            method = self.stage_methods[name]
             disciplines.append(
                 JAXDiscipline(
                     function=piece.function,

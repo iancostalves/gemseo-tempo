@@ -97,3 +97,93 @@ def plot_study(
     figure.savefig(path, dpi=140)
     plt.close(figure)
     return path
+
+
+TRANSCRIPTION_COLORS = {
+    "shooting": "#2a78d6",
+    "collocation": "#eb6834",
+    "indirect": "#1baf7a",
+}
+"""One colour per transcription, the same on every page."""
+
+
+def plot_transcriptions(rows, axes=None):
+    """Draw the error and the cost of each transcription against the grid.
+
+    The direct transcriptions are lines over the discretization. The
+    indirect one has no grid to refine, its accuracy being the
+    integrator's, so it is a single level drawn across the whole range.
+    A solve that did not meet its constraints is left out: its answer is
+    not an answer to the problem. Where there is no closed form, the
+    errors are measured against the best solve, whose own error is zero;
+    a logarithmic axis cannot show zero, so that point is drawn a decade
+    below the smallest positive error, as a hollow downward triangle.
+
+    Parameters
+    ----------
+    rows
+        The benchmark rows: ``transcription``, ``size`` (``None`` for the
+        indirect one), ``error``, ``seconds`` and, optionally, ``met``.
+    axes
+        Two axes, for the error and for the time; a new figure when
+        omitted.
+
+    Returns
+    -------
+    list
+        The axes drawn on.
+    """
+    if axes is None:
+        _, axes = plt.subplots(1, 2, figsize=(9.0, 3.6))
+    sizes = sorted({row["size"] for row in rows if row["size"] is not None})
+    positive = [row["error"] for row in rows if row["error"] > 0.0]
+    floor = 0.1 * min(positive, default=1.0)
+    for name, color in TRANSCRIPTION_COLORS.items():
+        chosen = [
+            row for row in rows if row["transcription"] == name and row.get("met", True)
+        ]
+        if not chosen:
+            continue
+        for axis, key in zip(axes, ("error", "seconds"), strict=True):
+            if chosen[0]["size"] is None:
+                axis.hlines(
+                    chosen[0][key],
+                    sizes[0],
+                    sizes[-1],
+                    colors=color,
+                    linestyles="--",
+                    label=f"{name} (no grid)",
+                )
+                continue
+            chosen = sorted(chosen, key=lambda row: row["size"])
+            values = [row[key] for row in chosen]
+            if key == "error":
+                values = [value if value > 0.0 else floor for value in values]
+            axis.plot(
+                [row["size"] for row in chosen],
+                values,
+                marker="o",
+                color=color,
+                label=name,
+            )
+            reference = [row["size"] for row in chosen if row["error"] == 0.0]
+            if key == "error" and reference:
+                axis.plot(
+                    reference,
+                    [floor] * len(reference),
+                    linestyle="none",
+                    marker="v",
+                    markersize=9,
+                    markerfacecolor="white",
+                    color=color,
+                )
+    for axis, label in zip(
+        axes, ("relative error of the optimum", "wall time (s)"), strict=True
+    ):
+        axis.set_xscale("log")
+        axis.set_yscale("log")
+        axis.set_xlabel("segments or control intervals")
+        axis.set_ylabel(label)
+        axis.grid(True, which="major", alpha=0.3)
+    axes[0].legend(fontsize=8)
+    return axes

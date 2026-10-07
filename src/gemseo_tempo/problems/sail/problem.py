@@ -103,8 +103,12 @@ What singles this problem out is the wind field. It is the only one whose
 right-hand side reads an interpolated
 :class:`~gemseo_tempo.dynamics.fields.SpatialField`, whose transpose is a
 scatter-add, and that is what the checkpointed reverse pass mishandles once
-it is itself batched. The brachistochrone and the albatross are exact under
-both adjoints at every route measured.
+it is itself batched. It is not the only
+problem the batched pass can get wrong: the albatross's energy cycle, flown
+by single shooting at a fixed step, came out exact with a hundred save
+points but 1% to 14% off with twenty or forty, against forward mode and
+finite differences that agree with each other; the brachistochrone was
+exact everywhere measured. Its pages report the comparison.
 
 The Direct adjoint unrolls the solve instead of checkpointing it and is
 exact everywhere measured. It costs about a third more to solve the
@@ -144,6 +148,14 @@ def sail_integrator(**settings) -> DiffraxIntegrator:
     settings.setdefault("adjoint", SAIL_ADJOINT)
     return DiffraxIntegrator(**settings)
 
+
+CORRIDOR_HALF_WIDTH = 500.0
+"""How far north or south of the rhumb line the boat may sail, in m.
+
+A race is sailed in a bounded area. Without one the optimum is free to
+wander as far across the wind as a gybe angle takes it, which on the
+upwind leg is a long way and nothing like a race.
+"""
 
 LEGS = {
     # The wind blows east, so the mark to the east is dead downwind and the
@@ -286,7 +298,7 @@ def create_scenario(
     guess: Guess | None = None,
     wind_name: str = "uniform",
     enforce_no_go: bool = False,
-    channel_half_width: float | None = None,
+    channel_half_width: float | None = CORRIDOR_HALF_WIDTH,
     integrator=None,
     check_adjoint: bool = True,
     **scenario_settings,
@@ -314,7 +326,8 @@ def create_scenario(
         the constraint only forbids the crossing a tack is made of.
     channel_half_width
         The distance either side of the rhumb line the boat may use, in
-        m; unconstrained when omitted.
+        m: the race area, :data:`CORRIDOR_HALF_WIDTH`, by default, and
+        unconstrained when ``None``.
     integrator
         The execution model of the dynamics; an adaptive integrator with
         the adjoint this problem needs when omitted. Worth passing when

@@ -177,3 +177,60 @@ def test_lagrange_augmentation_matches_trapezoid(lqr_pieces):
     assert float(discipline.local_data["cost"][0]) == pytest.approx(
         float(trapezoid), abs=1e-6
     )
+
+
+def test_each_stage_can_differentiate_in_its_own_mode(lqr_pieces):
+    """Reverse through the statics, forward through the dynamics.
+
+    Each discipline takes the mode it is given, and the chain Jacobian is
+    the same as with every stage in reverse: the mode changes the cost of a
+    derivative, never its value.
+    """
+    from gemseo_tempo.dynamics import DiffraxIntegrator
+
+    pieces = dict(lqr_pieces)
+    pieces["integrator"] = DiffraxIntegrator(
+        rtol=1e-12, atol=1e-12, n_save=21, adjoint="Direct"
+    )
+    mixed = DynamicScenario(
+        assembly="split",
+        differentiation_method={"statics": "reverse", "dynamics": "forward"},
+        **pieces,
+    )
+    assert mixed.stage_methods == {
+        "statics": "reverse",
+        "dynamics": "forward",
+        "outputs": "reverse",
+    }
+    assert mixed.differentiation_method == "forward"
+    reverse = DynamicScenario(
+        assembly="split", differentiation_method="reverse", **pieces
+    )
+    jacobians = []
+    for scenario in (mixed, reverse):
+        chain = JAXChain(
+            scenario.disciplines,
+            differentiation_method=JAXChain.DifferentiationMethod.FORWARD,
+        )
+        chain.add_differentiated_inputs(["control.u", "constant.k"])
+        chain.add_differentiated_outputs(["cost"])
+        chain.linearize()
+        jacobians.append(numpy.asarray(chain.jac["cost"]["control.u"]))
+    for discipline, mode in zip(
+        mixed.disciplines, ("reverse", "forward", "reverse"), strict=True
+    ):
+        assert discipline._JAXDiscipline__differentiation_method == mode
+    assert numpy.max(numpy.abs(jacobians[0] - jacobians[1])) < 1e-10
+
+
+@pytest.mark.parametrize(
+    ("method", "assembly", "message"),
+    [
+        ({"dynamics": "reverse"}, "monolithic", "needs the split assembly"),
+        ({"design": "reverse"}, "split", r"Unknown stages \['design'\]"),
+        ({"outputs": "sideways"}, "split", r"Unknown differentiation modes"),
+    ],
+)
+def test_modes_per_stage_are_checked(lqr_pieces, method, assembly, message):
+    with pytest.raises(ValueError, match=message):
+        DynamicScenario(assembly=assembly, differentiation_method=method, **lqr_pieces)
