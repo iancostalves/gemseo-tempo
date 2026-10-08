@@ -121,16 +121,17 @@ at least makes the answer mean something.
 """
 
 TOPOLOGIES = ("loop", "weave")
-"""The two cycle shapes.
+"""The two cycle shapes, Barnes's two families.
 
-A **loop** turns all the way round, so the heading gains a full turn and the
-ground track closes as an O. A **weave** turns one way and back, so the
-heading returns to itself and the track is an S. The periodicity offset is
-the only thing that distinguishes them.
+A **loop** turns all the way round, so the heading gains a full turn: an O
+through the air, which the wind carries downwind over the sea. A **weave**
+turns one way and back either side of crosswind, so the heading returns to
+itself: an S, snaking across the wind. The periodicity offset on the heading
+is the only thing that distinguishes them.
 """
 
-WEAVE_HEADING_SWING = 1.6
-"""The heading amplitude of the guessed weave, in rad."""
+WEAVE_HEADING_SWING = 1.2
+"""The heading amplitude of the guessed weave either side of crosswind, in rad."""
 
 MISSIONS = ("energy", "distance", "time")
 """What the cycle is being flown for.
@@ -247,16 +248,17 @@ def soaring_cycle(
             guess.climb_amplitude * jnp.sin(phase) * (2.0 * jnp.pi / guess.period)
         )
     else:
-        # The heading swings either side of dead upwind and comes back, so
-        # it gains nothing over the cycle. The climb peaks where the heading
-        # is most nearly upwind, which is where climbing pays best.
-        heading = jnp.pi + WEAVE_HEADING_SWING * jnp.sin(phase)
-        climb = guess.climb_amplitude * jnp.cos(phase)
+        # The heading swings either side of crosswind and comes back, so it
+        # gains nothing over the cycle: a snake across the wind. The bird
+        # climbs while turned into the wind and descends while turned away
+        # from it, the two halves in which the gradient pays.
+        heading = 0.5 * jnp.pi + WEAVE_HEADING_SWING * jnp.sin(phase)
+        climb = guess.climb_amplitude * jnp.sin(phase)
         heading_rate = (
             WEAVE_HEADING_SWING * jnp.cos(phase) * 2.0 * jnp.pi / guess.period
         )
         climb_accel = (
-            -guess.climb_amplitude * jnp.sin(phase) * (2.0 * jnp.pi / guess.period)
+            guess.climb_amplitude * jnp.cos(phase) * (2.0 * jnp.pi / guess.period)
         )
     speed = guess.airspeed * jnp.ones_like(times)
 
@@ -507,6 +509,8 @@ def create_codesign_scenario(
     design: dict[str, float] | None = None,
     integrator=None,
     target_distance: float | None = None,
+    topology: str = "loop",
+    displacement: tuple[float, float] | None = None,
 ) -> DynamicScenario:
     """Build the minimum-wind, energy-neutral cycle.
 
@@ -535,6 +539,14 @@ def create_codesign_scenario(
         terminal constraint that the distance is actually covered. That is
         the trade a Pareto front is drawn over: a bird that will accept
         more wind can cross faster.
+    topology
+        ``"loop"``, an O, or ``"weave"``, an S; see :data:`TOPOLOGIES`.
+    displacement
+        Where over the sea the cycle must end, ``(x, y)`` in m from where
+        it started: ``(0, 0)`` makes it a hover rather than a passage. Free
+        when omitted, so the wind carries the cycle wherever it is cheapest
+        to fly. Anything in between is a stepping stone: a hover is hard to
+        find directly and easy to reach from a passage by shortening it.
 
     Returns
     -------
@@ -542,7 +554,9 @@ def create_codesign_scenario(
         The scenario, seeded with the guessed cycle.
     """
     guess = guess or Guess()
-    times, states, controls = soaring_cycle(guess, NOMINAL_WIND, design, size + 1)
+    times, states, controls = soaring_cycle(
+        guess, NOMINAL_WIND, design, size + 1, topology
+    )
     values = _design_values(design)
     state_space = create_state_space()
     transcription = transcription or HermiteSimpson(num_segments=size)
@@ -578,7 +592,12 @@ def create_codesign_scenario(
         functionals=(objective,),
         constraints=(
             PeriodicityConstraint(
-                "cycle", ["h", "V", "gamma", "psi"], offsets={"psi": TURN}
+                "cycle",
+                ["h", "V", "gamma", "psi"] + (["x", "y"] if displacement else []),
+                offsets={
+                    "psi": TURN if topology == "loop" else 0.0,
+                    **dict(zip(("x", "y"), displacement or (), strict=False)),
+                },
             ),
             *_path_constraints(),
             *crossing,
@@ -671,6 +690,8 @@ def create_codesign_optimization(
     design_names: Sequence[str] = ("w_ref", "wing_area", "wing_span", "section"),
     integrator=None,
     target_distance: float | None = None,
+    topology: str = "loop",
+    displacement: tuple[float, float] | None = None,
 ):
     """Build the GEMSEO scenario of the minimum-wind cycle.
 
@@ -689,6 +710,15 @@ def create_codesign_optimization(
         the wind, which is the simultaneous co-design; passing just
         ``("w_ref",)`` holds the wing and optimizes the trajectory alone,
         which is what the sequential route does once its wing is chosen.
+    integrator
+        The integrator; see :func:`create_codesign_scenario`.
+    target_distance
+        A ground distance to cover; see :func:`create_codesign_scenario`.
+    topology
+        ``"loop"`` or ``"weave"``; see :data:`TOPOLOGIES`.
+    displacement
+        Where over the sea the cycle must end; see
+        :func:`create_codesign_scenario`.
 
     Returns
     -------
@@ -696,7 +726,14 @@ def create_codesign_optimization(
         The :class:`.DynamicScenario` and the GEMSEO scenario on it.
     """
     scenario = create_codesign_scenario(
-        transcription, size, guess, design, integrator, target_distance
+        transcription,
+        size,
+        guess,
+        design,
+        integrator,
+        target_distance,
+        topology,
+        displacement,
     )
     bounds = _bounds(scenario)
     bounds["constant.w_ref"] = WIND_BOUNDS

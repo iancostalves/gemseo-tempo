@@ -243,3 +243,89 @@ def test_the_robust_discipline_reports_the_statistics_as_outputs(frozen):
         assert f"{QUANTITY}.{statistic}" in outputs
     # And it still produces everything the transcription did.
     assert set(scenario.problem.output_names) <= outputs
+
+
+def test_a_statistic_can_be_the_objective(frozen):
+    scenario, names, sample, _ = frozen
+    discipline = robust_discipline(scenario, names, sample[:16], QUANTITY)
+    formulation = OptimalControl(
+        scenario, disciplines=[discipline], objective=f"{QUANTITY}.{MARGIN}"
+    )
+    gemseo_scenario = formulation.create_gemseo_scenario()
+    objective = gemseo_scenario.formulation.optimization_problem.objective
+    assert objective.name == f"{QUANTITY}.{MARGIN}"
+
+
+@pytest.fixture(scope="module")
+def frozen_direct(frozen):
+    """The same frozen descent, integrated through the Direct adjoint."""
+    scenario, names, sample, check = frozen
+    direct = scenario.retranscribe(
+        scenario.transcription,
+        integrator=DiffraxIntegrator(dt0=0.005, n_save=21, adjoint="Direct"),
+    )
+    direct.problem.input_defaults.update(scenario.problem.input_defaults)
+    return direct, names, sample, check
+
+
+ALL_OUTPUTS = [QUANTITY, f"{QUANTITY}.{MARGIN}", f"{QUANTITY}.{RELIABILITY}"]
+
+
+@pytest.mark.parametrize(
+    ("direct", "modes", "inputs", "outputs", "tolerance"),
+    [
+        (False, ("auto", "auto"), None, ALL_OUTPUTS, 1e-10),
+        (False, ("auto", "auto"), None, [f"{QUANTITY}.{MARGIN}"], 1e-10),
+        (False, ("fd", "fd"), None, ALL_OUTPUTS, 1e-4),
+        (True, ("forward", "reverse"), None, ALL_OUTPUTS, 1e-10),
+        # One input, a whole trajectory out: auto takes forward mode.
+        (True, ("auto", "auto"), ["t_f"], ["trajectory.y"], 1e-10),
+    ],
+)
+def test_the_grouped_jacobian_is_the_whole_jacobian(
+    frozen, frozen_direct, direct, modes, inputs, outputs, tolerance
+):
+    """Differentiating group by group changes the cost, not the answer."""
+    import jax
+
+    scenario, names, sample, _ = frozen_direct if direct else frozen
+    discipline = robust_discipline(
+        scenario, names, sample[:16], QUANTITY, modes=modes, fd_step=1e-7
+    )
+    inputs = inputs or list(scenario.problem.design_variables)
+    discipline.add_differentiated_inputs(inputs)
+    discipline.add_differentiated_outputs(outputs)
+    discipline.linearize()
+    # A second time reuses the compiled transforms.
+    discipline._compute_jacobian()
+    grouped = discipline.jac
+
+    data = {name: discipline.io.data[name] for name in discipline.input_grammar.names}
+
+    def whole(differentiated):
+        values = discipline.jax_out_func({**data, **differentiated})
+        return {name: values[name] for name in outputs}
+
+    expected = jax.jacrev(whole)({name: data[name] for name in inputs})
+    for output in outputs:
+        for name in inputs:
+            numpy.testing.assert_allclose(
+                numpy.ravel(grouped[output][name]),
+                numpy.ravel(expected[output][name]),
+                rtol=tolerance,
+                atol=tolerance * max(1.0, numpy.max(numpy.abs(expected[output][name]))),
+            )
+
+
+@pytest.mark.parametrize(
+    ("modes", "message"),
+    [
+        (("auto", "sideways"), "per group"),
+        (("auto",), "per group"),
+        (("forward", "auto"), "Forward mode is not allowed"),
+    ],
+)
+def test_the_modes_of_the_groups_are_checked(frozen, modes, message):
+    scenario, names, sample, _ = frozen
+    with pytest.raises(ValueError, match=message):
+        robust_discipline(scenario, names, sample[:4], QUANTITY, modes=modes)

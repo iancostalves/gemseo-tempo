@@ -169,4 +169,3 @@ The objective reported is also not the first functional: the functionals
 define the problem that shapes the Hamiltonian, while the optimizer drives
 the boundary-condition residuals to zero, and the achieved cost is
 reported separately as `ocp_cost`.
-

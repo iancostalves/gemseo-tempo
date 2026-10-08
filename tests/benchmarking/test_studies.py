@@ -26,6 +26,7 @@ import numpy
 import pytest
 
 from gemseo_tempo.benchmarking.plots import plot_study
+from gemseo_tempo.benchmarking.plots import plot_transcriptions
 from gemseo_tempo.benchmarking.profiles import data_profile
 from gemseo_tempo.benchmarking.profiles import profile_table
 from gemseo_tempo.benchmarking.runner import BUDGET
@@ -224,3 +225,61 @@ def test_run_study_without_a_cache():
     )
     assert len(records) == len(STUDIES["transcription"])
     assert {r.study for r in records} == {"transcription"}
+
+
+def test_the_transcription_figure_draws_a_level_for_the_gridless_one():
+    rows = [
+        {"transcription": "shooting", "size": 10, "error": 1e-2, "seconds": 1.0},
+        {"transcription": "shooting", "size": 20, "error": 1e-3, "seconds": 2.0},
+        {"transcription": "collocation", "size": 10, "error": 1e-4, "seconds": 3.0},
+        {"transcription": "indirect", "size": None, "error": 1e-9, "seconds": 5.0},
+        {
+            "transcription": "collocation",
+            "size": 20,
+            "error": 0.5,
+            "seconds": 9.0,
+            "met": False,
+        },
+    ]
+    axes = plot_transcriptions(rows)
+    assert len(axes[0].lines) == 2
+    assert len(axes[0].collections) == 1
+    # The unmet collocation solve is not drawn: one point on its line.
+    assert len(axes[0].lines[1].get_xdata()) == 1
+    assert axes[0].get_xscale() == "log"
+
+
+def test_the_reference_solve_is_drawn_below_the_errors_not_dropped():
+    """A zero error, the reference's own, is drawn a decade below the rest."""
+    rows = [
+        {"transcription": "shooting", "size": 10, "error": 1e-2, "seconds": 1.0},
+        {"transcription": "shooting", "size": 20, "error": 0.0, "seconds": 2.0},
+    ]
+    axes = plot_transcriptions(rows)
+    line, marker = axes[0].lines
+    assert list(line.get_ydata()) == [1e-2, 1e-3]
+    assert list(marker.get_xdata()) == [20]
+    assert list(marker.get_ydata()) == [1e-3]
+    # The time panel is untouched.
+    assert len(axes[1].lines) == 1
+
+
+def test_the_transcription_figure_draws_on_given_axes_and_skips_the_unconverged():
+    """An indirect solve that did not converge is left out altogether."""
+    import matplotlib.pyplot as plt
+
+    _, given = plt.subplots(1, 2)
+    rows = [
+        {"transcription": "shooting", "size": 10, "error": 1e-2, "seconds": 1.0},
+        {
+            "transcription": "indirect",
+            "size": None,
+            "error": 0.3,
+            "seconds": 5.0,
+            "met": False,
+        },
+    ]
+    axes = plot_transcriptions(rows, axes=given)
+    assert axes is given
+    assert len(axes[0].lines) == 1
+    assert len(axes[0].collections) == 0

@@ -3,6 +3,59 @@
 ```{variable-context} gemseo_tempo.problems.albatross.model:REGISTRY
 ```
 
+```{eval-rst}
+.. plot:: _ext/gallery/albatross_scenario.py
+   :include-source: false
+```
+
+A schematic, after the opening figures of Hong et al. and Koessler
+{footcite:p}`hong_dynamic_2023,koessler_dynamic_2019`, not a result. The
+terrestrial frame is fixed to the sea: {var}`x <symbol>` downwind,
+{var}`y <symbol>` across the wind, {var}`h <symbol>` up. The wind blows along
++x with a speed W(h) that depends on height only. The airspeed
+{var}`V <symbol>`, flight path angle {var}`gamma <symbol>` and heading
+{var}`psi <symbol>` are measured in the wind-fixed frame, which moves with
+the local air, and the two frames are linked by the wind triangle:
+
+```{math}
+:label: eq-alb-triangle
+
+\mathbf v_\mathrm{ground} = \mathbf v_\mathrm{air} + W(h)\,\mathbf e_x .
+```
+
+That frame is not inertial: climbing moves the bird into faster air, so it
+accelerates at Ẇ = W′(h) V sin γ, and Newton's law written in it gains a
+fictitious force −m Ẇ **e**{sub}`x`. That force is what the bird feeds on
+{footcite:p}`koessler_dynamic_2019`. One instant of an optimized cycle, taken
+apart frame by frame:
+
+```{eval-rst}
+.. plot:: _ext/gallery/albatross_frames.py
+   :include-source: false
+```
+
+**Two families of cycle.** Barnes sorts the cycles an albatross flies into
+two families {footcite:p}`barnes_albatross_2004`: an O, a spiral whose
+heading gains a full turn per cycle, and an S, a snake whose heading swings
+either side of crosswind and back. Both climb while turned into the wind and
+descend while turned away from it:
+
+```{eval-rst}
+.. plot:: _ext/gallery/albatross_cycle_shapes.py
+   :include-source: false
+```
+
+**Assumptions.**
+1. A point mass without sideslip, on a flat, non-rotating Earth.
+2. A quadratic drag polar whose coefficients and stall limit come from the
+   wing, through a statics chain.
+3. A steady wind along x in a neutral logarithmic boundary layer, with no
+   gusts and no updrafts off the waves.
+4. Constant mass and air density; the bird flies no lower than 2 m, at a
+   load factor of at most 4.5.
+5. The cycle repeats: height, airspeed, climb angle and heading return to
+   their initial values, the heading up to a full turn for an O.
+
 ## Kinematics
 
 ```{eval-rst}
@@ -14,9 +67,9 @@ One loop, leg by leg. The manoeuvre is three-dimensional and a side-on
 wave hides the half of it that matters: the bird **climbs while headed into
 the wind**, turns through the top of the gradient, **descends headed with
 it**, and turns back at the bottom. The four legs are named as
-{cite}`hong2023dynamic` names them — windward climb and leeward descent,
+{footcite:t}`hong_dynamic_2023` names them — windward climb and leeward descent,
 either side of the upwind-to-downwind turn — and
-{cite}`koessler2019dynamic` makes the case that the turn is not merely the
+{footcite:t}`koessler_dynamic_2019` makes the case that the turn is not merely the
 join between the two gradient crossings but carries energy exchange of its
 own, which is the reason to draw it as a leg rather than a corner.
 
@@ -102,9 +155,9 @@ energy while the gain fails to match the work that made it.
 Which energy, though, is a question with a literature behind it, and it is
 worth saying which side this model takes. Kinetic energy can be written
 against the **inertial** speed, as an observer on the water measures it, or
-against the **airspeed**, as the aerodynamics feel it; {cite}`koessler2019dynamic`
+against the **airspeed**, as the aerodynamics feel it; {footcite:t}`koessler_dynamic_2019`
 sets out how easily the two are confused and what goes wrong when the wrong
-one is differentiated, and {cite}`hong2023dynamic` adopts the airspeed form
+one is differentiated, and {footcite:t}`hong_dynamic_2023` adopts the airspeed form
 "because the energy concept related to airspeed shows a clear connection to
 the wind profile". {eq}`albatross-energy` is that form, for the same reason:
 written this way the wind gradient appears explicitly as the term the bird
@@ -152,6 +205,11 @@ them:
 | 0.0 (thin, clean) | 0.025 | 1.20 | 27.8 |
 | 0.5 (nominal) | 0.033 | 1.50 | 24.2 |
 | 1.0 (thick, cambered) | 0.041 | 1.80 | 21.7 |
+
+```{eval-rst}
+.. plot:: _ext/gallery/albatross_polar.py
+   :include-source: false
+```
 
 `plot_polar` draws the drag polar and the glide ratio of any design, marking
 both the best-glide lift coefficient and the stall limit. `plot_section_trade`
@@ -207,7 +265,7 @@ to 21.8.
 
 The profile is logarithmic, which is what a boundary layer over open water
 looks like, and is the model the dynamic-soaring literature is built on
-{cite}`hong2023dynamic`:
+{footcite:p}`hong_dynamic_2023`:
 
 ```{math}
 :label: albatross-wind
@@ -217,7 +275,7 @@ W(h) = w_{ref} \frac{\ln(h / h_0)}{\ln(h_{ref} / h_0)}
 with `h0` the roughness length of the sea surface, 0.03 m, and `h_ref` the
 10 m at which the reference wind is quoted. It is a simplification worth
 naming: a real marine boundary layer is only logarithmic when it is
-neutrally stable, and {cite}`hong2023dynamic` shows the profile shifting
+neutrally stable, and {footcite:t}`hong_dynamic_2023` shows the profile shifting
 between convective and stable over a diurnal cycle, with the minimum wind a
 cycle needs moving accordingly. This model holds the neutral case, so
 {var}`roughness <symbol>` carrying an uncertainty is standing in for that
@@ -238,25 +296,17 @@ whole manoeuvre happens low down:
 | 10 m | 12.0 m/s | 0.21 1/s |
 | 30 m | 15.2 m/s | 0.07 1/s |
 
-Thirty times weaker at 30 m than at 1 m. `plot_wind_profile` draws both
-panels, and the gradient one needs a logarithmic axis to fit on the page. The
-roughness length `h0` and the reference wind `w_ref` are exactly the two
-quantities that carry uncertainty in this problem; see
-{ref}`UQ strategies comparison <uq-strategies-comparison>`.
-
-## An example simulation
-
-No optimizer, no constraints: `soaring_cycle` builds a closed cycle directly
-from the shape the energy equation asks for, then **inverts the two
-rotational equations of motion** for the lift and bank that would fly it.
-Nothing here is solved; it is a construction, evaluated once.
-
 ```{eval-rst}
-.. plot:: _ext/gallery/albatross_example_simulation.py
+.. plot:: _ext/gallery/albatross_wind_profile.py
    :include-source: false
 ```
 
-The guessed cycle already comes close to closing, which is what makes it a
-usable starting point for the optimizations below rather than a stumbling
-block: see {ref}`The shape of the cycle <the-shape-of-the-cycle>` and
-{ref}`Three things that had to be got right <three-things-that-had-to-be-got-right>`.
+Thirty times weaker at 30 m than at 1 m. `plot_wind_profile` draws both
+panels, and the gradient one needs a logarithmic axis to fit on the page. The
+roughness length `h0` and the reference wind `w_ref` are exactly the two
+quantities that carry uncertainty in this problem; see {doc}`uncertainty`.
+
+## References
+
+```{footbibliography}
+```

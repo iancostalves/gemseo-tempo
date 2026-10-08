@@ -1,0 +1,46 @@
+{
+ "w_ref": 22.0,
+ "target_distance": 250.0,
+ "loop_energy": {
+  "met": true,
+  "objective": -76.7701097669446,
+  "air_change": 7.578468584477733,
+  "distance": 229.04198182551409,
+  "duration": 9.0
+ },
+ "loop_distance": {
+  "met": true,
+  "objective": -333.76708471304573,
+  "air_change": 0.0,
+  "distance": 333.76708471304573,
+  "duration": 9.0
+ },
+ "loop_time": {
+  "met": true,
+  "objective": 7.631772531279412,
+  "air_change": 0.0,
+  "distance": 250.0,
+  "duration": 7.631772531279412
+ },
+ "weave_energy": {
+  "met": true,
+  "objective": -64.1489117680624,
+  "air_change": 7.8150518983682105,
+  "distance": 226.45786379950096,
+  "duration": 9.0
+ },
+ "weave_distance": {
+  "met": true,
+  "objective": -335.91325432886697,
+  "air_change": 0.0,
+  "distance": 335.91325432886697,
+  "duration": 9.0
+ },
+ "weave_time": {
+  "met": true,
+  "objective": 7.115519940332073,
+  "air_change": 0.0,
+  "distance": 250.0,
+  "duration": 7.115519940332073
+ }
+}

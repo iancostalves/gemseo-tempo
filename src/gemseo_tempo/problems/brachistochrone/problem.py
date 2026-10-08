@@ -184,6 +184,7 @@ def create_scenario(
     target: tuple[float, float] = TARGET,
     gravity: float = GRAVITY,
     integrator=None,
+    constants: dict[str, float] | None = None,
     **scenario_settings,
 ) -> DynamicScenario:
     """Build the brachistochrone scenario for one transcription.
@@ -203,6 +204,11 @@ def create_scenario(
         The target point ``(x, y)``, in m.
     gravity
         The gravitational acceleration, in m/s**2.
+    integrator
+        The integrator; an adaptive one when omitted.
+    constants
+        Constants laid over the variant's, such as the means of the
+        uncertain ones a design is propagated around.
     **scenario_settings
         Extra settings forwarded to :class:`.DynamicScenario`.
 
@@ -212,7 +218,7 @@ def create_scenario(
         The scenario, already seeded with the guess.
     """
     guess = guess or Guess()
-    constants = variant_constants(variant, gravity)
+    constants = {**variant_constants(variant, gravity), **(constants or {})}
     transcription = transcription or HermiteSimpson(num_segments=size)
     indirect = isinstance(transcription, IndirectShooting)
 

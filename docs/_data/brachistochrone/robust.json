@@ -1,0 +1,102 @@
+{
+ "factor": 2.0,
+ "design_sample": 64,
+ "check_sample": 4000,
+ "fd_step": 1e-07,
+ "designs": {
+  "ideal": {
+   "met": true,
+   "seconds": 9.196784957001,
+   "calls": 21,
+   "nominal": 0.8578312525098364,
+   "mean": 0.8578161256872502,
+   "std": 0.006736300432276818,
+   "p05": 0.8467272352220693,
+   "p95": 0.8690677387275948
+  },
+  "nominal": {
+   "met": true,
+   "seconds": 10.68501628499871,
+   "calls": 23,
+   "nominal": 0.8577121218154627,
+   "mean": 0.8576949087879535,
+   "std": 0.006695244344481448,
+   "p05": 0.8466666282258418,
+   "p95": 0.8688437782647686
+  },
+  "robust": {
+   "objective": 0.87115676290416,
+   "met": true,
+   "modes": [
+    "auto",
+    "auto"
+   ],
+   "compile_seconds": 17.808375049999086,
+   "seconds": 3.788912875999813,
+   "calls": 20,
+   "nominal": 0.8577183059855159,
+   "mean": 0.8577007687741457,
+   "std": 0.00668771016520071,
+   "p05": 0.8466924201508407,
+   "p95": 0.8688276639926591
+  },
+  "robust_fd": {
+   "objective": 0.8711567629046256,
+   "met": true,
+   "modes": [
+    "fd",
+    "fd"
+   ],
+   "compile_seconds": 8.43924200299989,
+   "seconds": 6.828647522999745,
+   "calls": 20,
+   "nominal": 0.8577183059734345,
+   "mean": 0.8577007687620817,
+   "std": 0.006687710173510989,
+   "p05": 0.8466924201065257,
+   "p95": 0.8688276639861962
+  }
+ },
+ "gradient_cost": [
+  {
+   "size": 10,
+   "n_design": 12,
+   "evaluation_seconds": 0.03221855300034804,
+   "ad_seconds": 0.09282127999904333,
+   "ad_route": "reverse, RecursiveCheckpoint",
+   "fd_seconds": 0.23444793999988178,
+   "fd_variant": "batched",
+   "fd_step": 1e-07
+  },
+  {
+   "size": 20,
+   "n_design": 22,
+   "evaluation_seconds": 0.033893204999912996,
+   "ad_seconds": 0.1137502300007327,
+   "ad_route": "reverse, RecursiveCheckpoint",
+   "fd_seconds": 0.450141542001802,
+   "fd_variant": "batched",
+   "fd_step": 1e-07
+  },
+  {
+   "size": 40,
+   "n_design": 42,
+   "evaluation_seconds": 0.032622369999444345,
+   "ad_seconds": 0.11927392700090422,
+   "ad_route": "reverse, RecursiveCheckpoint",
+   "fd_seconds": 0.877437065999402,
+   "fd_variant": "batched",
+   "fd_step": 1e-07
+  },
+  {
+   "size": 80,
+   "n_design": 82,
+   "evaluation_seconds": 0.03551033599978837,
+   "ad_seconds": 0.1299373439996998,
+   "ad_route": "reverse, RecursiveCheckpoint",
+   "fd_seconds": 1.8943666659997689,
+   "fd_variant": "batched",
+   "fd_step": 1e-07
+  }
+ ]
+}

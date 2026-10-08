@@ -14,22 +14,69 @@
 # Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 """Figures of a soaring cycle.
 
-Four views, each answering a different question. :func:`plot_trajectory`
-shows where the bird went, :func:`plot_controls` how it was flown,
-:func:`plot_energy` whether the cycle paid for itself, and
-:func:`plot_energy_analysis` why.
+Each view answers a different question. :func:`plot_scenario` sets the
+scene: the terrestrial frame, the wind profile and one cycle.
+:func:`plot_frames` takes one instant of it apart, in the frames the
+equations are written in. :func:`plot_trajectory` shows where the bird went
+through the boundary layer and where it gained or lost energy,
+:func:`plot_maneuver_pattern` what several cycles add up to, and
+:func:`plot_energy_analysis` why the cycle pays for itself.
+:func:`plot_controls` and :func:`plot_energy` are the plain time histories.
 
-The last one is the one worth reading carefully, and it is described where
-it is defined.
+The composition of the three-dimensional views follows the figures of
+Barnes (2004) as reproduced by Koessler (2019) and the scenario sketch of
+Hong et al. (2023): a sea surface, the path drawn as a wing-span ribbon so
+that the bank is visible, and the wind profile drawn in the scene rather
+than beside it.
+
+Every function takes either a :class:`.Trajectory` or a mapping of arrays
+keyed by name with the times under ``"ts"``, which is what the stored
+results under ``docs/_data`` load as.
 """
 
 from __future__ import annotations
+
+from collections.abc import Mapping
 
 import matplotlib
 
 matplotlib.use("Agg")
 import numpy  # noqa: E402
 from matplotlib import pyplot  # noqa: E402
+from matplotlib.colors import LinearSegmentedColormap  # noqa: E402
+from matplotlib.colors import TwoSlopeNorm  # noqa: E402
+from matplotlib.ticker import MaxNLocator  # noqa: E402
+
+SERIES = ("#2a78d6", "#eb6834", "#1baf7a")
+"""Blue, orange and aqua: the first three slots of a categorical palette
+validated as a set for colour-vision deficiency, in that fixed order."""
+
+INK = "#0b0b0b"
+"""Primary text and outlines."""
+
+MUTED = "#8a8985"
+"""Axes, frames, shadows and other recessive marks."""
+
+SEA = "#cde2fb"
+"""The sea surface, the lightest step of the blue ramp."""
+
+WIND_MAP = LinearSegmentedColormap.from_list(
+    "wind", ["#cde2fb", "#86b6ef", "#3987e5", "#1c5cab", "#0d366b"]
+)
+"""Wind speed: one hue, light to dark."""
+
+VIEW = (26.0, -115.0)
+"""The elevation and azimuth the three-dimensional views are seen from."""
+
+SCENARIO_VIEW = (20.0, -30.0)
+"""The view of the schematic scenario, as in Hong et al. (2023), Fig. 1:
+from downwind and a little behind, so that the snake runs across the page
+and the wind blows towards the reader."""
+
+RATE_MAP = LinearSegmentedColormap.from_list(
+    "energy_rate", ["#e34948", "#f0efec", "#2a78d6"]
+)
+"""Energy rate: red losing, grey neutral, blue gaining."""
 
 
 def _series(trajectory, name):
@@ -52,19 +99,274 @@ def _series(trajectory, name):
     KeyError
         If no series of that name exists.
     """
-    for group in (trajectory.states, trajectory.controls, trajectory.outputs):
+    groups = (
+        (trajectory,)
+        if isinstance(trajectory, Mapping)
+        else (trajectory.states, trajectory.controls, trajectory.outputs)
+    )
+    for group in groups:
         if name in group:
             return numpy.asarray(group[name])
     raise KeyError(f"No series named {name!r} in the trajectory.")
 
 
-def plot_trajectory(trajectory, axes=None):
-    """Draw the flight path in three dimensions, coloured by energy.
+def _times(trajectory):
+    """Return the save times of a trajectory or of a mapping of arrays.
 
     Parameters
     ----------
     trajectory
-        The cycle to draw.
+        The trajectory, or a mapping with the times under ``"ts"``.
+
+    Returns
+    -------
+    ndarray
+        The times.
+    """
+    if isinstance(trajectory, Mapping):
+        return numpy.asarray(trajectory["ts"])
+    return numpy.asarray(trajectory.ts)
+
+
+def _scalar(cycle, name, default):
+    """Return a scalar stored alongside a cycle, or a default.
+
+    Parameters
+    ----------
+    cycle
+        The trajectory, or a mapping of arrays.
+    name
+        The name of the scalar.
+    default
+        The value when the cycle does not carry one.
+
+    Returns
+    -------
+    float
+        The value.
+    """
+    if isinstance(cycle, Mapping) and name in cycle:
+        return float(numpy.ravel(cycle[name])[0])
+    return float(default)
+
+
+def _unit_vectors(gamma, psi, mu):
+    """Return the velocity, lift and span directions in the terrestrial frame.
+
+    With x downwind, y crosswind and h up, the air-relative velocity points
+    along ``(cos gamma cos psi, cos gamma sin psi, sin gamma)``. Bank rolls
+    the lift about it, towards the left of the path for a positive angle,
+    which is the direction the heading then turns (``dpsi/dt`` is
+    proportional to ``L sin mu``). The span is perpendicular to both.
+
+    Parameters
+    ----------
+    gamma
+        The flight path angle.
+    psi
+        The heading.
+    mu
+        The bank angle.
+
+    Returns
+    -------
+    tuple
+        Three ``(n, 3)`` arrays: velocity, lift and span (right to left).
+    """
+    gamma, psi, mu = (numpy.asarray(value, dtype=float) for value in (gamma, psi, mu))
+    velocity = numpy.stack(
+        [
+            numpy.cos(gamma) * numpy.cos(psi),
+            numpy.cos(gamma) * numpy.sin(psi),
+            numpy.sin(gamma),
+        ],
+        axis=-1,
+    )
+    left = numpy.stack([-numpy.sin(psi), numpy.cos(psi), 0.0 * psi], axis=-1)
+    up = numpy.stack(
+        [
+            -numpy.sin(gamma) * numpy.cos(psi),
+            -numpy.sin(gamma) * numpy.sin(psi),
+            numpy.cos(gamma),
+        ],
+        axis=-1,
+    )
+    lift = numpy.cos(mu)[..., None] * up + numpy.sin(mu)[..., None] * left
+    span = numpy.cos(mu)[..., None] * left - numpy.sin(mu)[..., None] * up
+    return velocity, lift, span
+
+
+def _phases(cycle) -> dict[str, int]:
+    """Locate the four phases of a cycle.
+
+    The windward climb and the leeward descent are where the wind gradient
+    adds most energy while climbing into the wind and descending with it;
+    the turns are the highest and the lowest points.
+
+    Parameters
+    ----------
+    cycle
+        The trajectory, or a mapping of arrays.
+
+    Returns
+    -------
+    dict
+        The index of each phase, keyed by its name.
+    """
+    gamma = _series(cycle, "gamma")
+    along = numpy.cos(_series(cycle, "psi"))
+    height = _series(cycle, "h")
+    gain = _series(cycle, "gradient_power")
+
+    def strongest(mask):
+        candidates = numpy.flatnonzero(mask)
+        if candidates.size == 0:
+            return int(numpy.argmax(gain))
+        return int(candidates[numpy.argmax(gain[candidates])])
+
+    return {
+        "windward climb": strongest((gamma > 0.0) & (along < 0.0)),
+        "upper turn": int(numpy.argmax(height)),
+        "leeward descent": strongest((gamma < 0.0) & (along > 0.0)),
+        "lower turn": int(numpy.argmin(height)),
+    }
+
+
+SHAPES = ("O", "S")
+"""The two cycle shapes the dynamic-soaring literature draws."""
+
+
+def schematic_cycle(shape: str = "O", points: int = 241) -> dict:
+    """Return one idealized cycle of either shape the literature draws.
+
+    Geometry only: no dynamics are integrated and nothing is optimized. The
+    shapes are those of the sketches in Barnes (2004), reproduced by
+    Koessler (2019), and of Hong et al. (2023), Fig. 1, built so that each
+    climbs while heading into the wind and descends while heading with it,
+    which is what the energy equation asks for.
+
+    - ``"O"``, a loop: the heading gains a full turn, the bird climbs on the
+      upwind half and descends on the downwind half, and the wind carries
+      the loop downwind.
+    - ``"S"``, a snake: the heading swings either side of crosswind, the bird
+      climbs while turned into the wind and descends while turned away from
+      it, and the pattern travels across the wind.
+
+    Parameters
+    ----------
+    shape
+        ``"O"`` or ``"S"``.
+    points
+        The number of samples over the cycle.
+
+    Returns
+    -------
+    dict
+        The positions, attitude angles and a phase parameter under ``"ts"``,
+        in the form the other figures of this module take.
+
+    Raises
+    ------
+    ValueError
+        If the shape is neither ``"O"`` nor ``"S"``.
+    """
+    if shape not in SHAPES:
+        msg = f"Unknown shape {shape!r}; use one of {list(SHAPES)}."
+        raise ValueError(msg)
+    phase = numpy.linspace(0.0, 2.0 * numpy.pi, points)
+    radius, climb, mean_height, drift = 20.0, 10.0, 13.0, 25.0
+    if shape == "O":
+        heading = phase
+        height = mean_height - climb * numpy.sin(phase)
+        rise = -climb * numpy.cos(phase)
+        bank = numpy.full(points, 0.6)
+    else:
+        heading = 0.5 * numpy.pi + 1.4 * numpy.sin(phase)
+        height = mean_height - climb * numpy.cos(phase)
+        rise = climb * numpy.sin(phase)
+        bank = 0.7 * numpy.cos(phase)
+    # Constant airspeed: the path advances by the radius per radian.
+    step = radius * numpy.diff(phase)
+    east = numpy.concatenate(
+        [[0.0], numpy.cumsum(step * numpy.cos(0.5 * (heading[1:] + heading[:-1])))]
+    )
+    north = numpy.concatenate(
+        [[0.0], numpy.cumsum(step * numpy.sin(0.5 * (heading[1:] + heading[:-1])))]
+    )
+    east = east + drift * phase / (2.0 * numpy.pi)
+    gamma = numpy.arctan(rise / radius)
+    return {
+        "ts": phase,
+        "x": east,
+        "y": north - north[0],
+        "h": height,
+        "gamma": gamma,
+        "psi": heading,
+        "mu": bank,
+        # The sign and the height dependence of the wind-gradient term,
+        # which is all the phases are located by.
+        "gradient_power": -numpy.sin(gamma) * numpy.cos(heading) / height,
+    }
+
+
+def _sea(axes, x_range, y_range):
+    """Draw the sea surface as a plane at zero height, behind everything else.
+
+    Matplotlib sorts 3D artists by depth, which puts a translucent plane in
+    front of whatever is above it half the time. Drawing order is fixed
+    instead: the sea first, then the rest in the order it is added.
+    """
+    axes.computed_zorder = False
+    east, north = numpy.meshgrid(x_range, y_range)
+    axes.plot_surface(
+        east,
+        north,
+        0.0 * east,
+        color=SEA,
+        alpha=0.6,
+        linewidth=0,
+        shade=False,
+        zorder=0,
+    )
+
+
+def _keep_whole(figure):
+    """Stop a tight bounding box from cropping 3D axis labels.
+
+    A tight bounding box is computed from each axis's own extent, which for
+    a 3D axis leaves its labels out, so saving with ``bbox_inches="tight"``
+    cuts them off. An invisible frame over the whole figure keeps it all.
+    """
+    figure.add_artist(
+        pyplot.Rectangle(
+            (0.0, 0.0), 1.0, 1.0, transform=figure.transFigure, fill=False, linewidth=0
+        )
+    )
+
+
+def _clean_3d(axes):
+    """Make a 3D axis recessive: light panes, muted ticks."""
+    for axis in (axes.xaxis, axes.yaxis, axes.zaxis):
+        axis.set_pane_color((1.0, 1.0, 1.0, 0.0))
+        axis._axinfo["grid"]["color"] = (0.85, 0.85, 0.85, 1.0)
+    axes.tick_params(colors=MUTED, labelsize=8)
+
+
+def plot_trajectory(trajectory, axes=None):
+    """Draw the cycle inside the boundary layer, coloured by its energy rate.
+
+    The wall behind the path is shaded by the wind speed at each height,
+    read off the cycle itself, so the reader sees which part of the
+    boundary layer each leg crosses. The path is coloured by the net rate
+    of change of the air-relative energy, drag and wind gradient together:
+    red where the bird is losing energy, blue where the wind is paying.
+    Its shadow on the sea and a few drop lines give the depth a flat
+    picture otherwise loses.
+
+    Parameters
+    ----------
+    trajectory
+        The cycle to draw, a trajectory or a mapping of arrays.
     axes
         The 3D axis to draw on; a new one when omitted.
 
@@ -73,29 +375,81 @@ def plot_trajectory(trajectory, axes=None):
     Axes
         The axis drawn on.
     """
+    from mpl_toolkits.mplot3d.art3d import Line3DCollection
+
     if axes is None:
-        figure = pyplot.figure(figsize=(7.0, 5.5))
+        figure = pyplot.figure(figsize=(7.6, 5.6))
         axes = figure.add_subplot(projection="3d")
     east = _series(trajectory, "x")
     north = _series(trajectory, "y")
     height = _series(trajectory, "h")
-    energy = _series(trajectory, "specific_energy")
+    rate = _series(trajectory, "drag_power") + _series(trajectory, "gradient_power")
+    wind = _series(trajectory, "wind")
+
+    margin_x = 0.12 * max(numpy.ptp(east), 1.0)
+    margin_y = 0.12 * max(numpy.ptp(north), 1.0)
+    x_range = numpy.array([east.min() - margin_x, east.max() + margin_x])
+    y_range = numpy.array([north.min() - margin_y, north.max() + margin_y])
+    top = 1.1 * max(height.max(), 1.0)
+    _sea(axes, x_range, y_range)
+
+    # The boundary layer, on the back wall: the wind speed at each height,
+    # interpolated from what the cycle itself flew through.
+    order = numpy.argsort(height)
+    levels = numpy.linspace(0.0, top, 40)
+    speeds = numpy.interp(levels, height[order], wind[order])
+    wall_x, wall_h = numpy.meshgrid(x_range, levels)
+    shade = WIND_MAP((speeds - speeds.min()) / max(numpy.ptp(speeds), 1e-9))[
+        :, None, :
+    ].repeat(2, axis=1)
+    axes.plot_surface(
+        wall_x,
+        0.0 * wall_x + y_range[1],
+        wall_h,
+        facecolors=shade,
+        alpha=0.55,
+        linewidth=0,
+        shade=False,
+    )
+    axes.text(
+        x_range[0], y_range[1], top, "wind speed W(h), darker is faster", fontsize=8
+    )
 
     points = numpy.stack([east, north, height], axis=1)
-    for start, end, value in zip(points[:-1], points[1:], energy[:-1], strict=True):
+    segments = numpy.stack([points[:-1], points[1:]], axis=1)
+    limit = max(numpy.max(numpy.abs(rate)), 1e-9)
+    norm = TwoSlopeNorm(vcenter=0.0, vmin=-limit, vmax=limit)
+    # A dark underlay, so that the neutral middle of the colour map, where
+    # the cycle neither gains nor loses, still reads against the page.
+    axes.plot(east, north, height, color=INK, linewidth=4.0, solid_capstyle="round")
+    path = Line3DCollection(
+        segments, cmap=RATE_MAP, norm=norm, linewidths=2.6, capstyle="round"
+    )
+    path.set_array(0.5 * (rate[:-1] + rate[1:]))
+    axes.add_collection3d(path)
+
+    axes.plot(east, north, 0.0 * height, color=MUTED, linewidth=1.0, linestyle="--")
+    for index in numpy.linspace(0, len(east) - 1, 13).astype(int)[1:-1]:
         axes.plot(
-            [start[0], end[0]],
-            [start[1], end[1]],
-            [start[2], end[2]],
-            color=pyplot.cm.viridis(
-                (value - energy.min()) / max(numpy.ptp(energy), 1e-9)
-            ),
-            linewidth=2.0,
+            [east[index]] * 2,
+            [north[index]] * 2,
+            [0.0, height[index]],
+            color=MUTED,
+            linewidth=0.6,
         )
-    axes.set_xlabel("downwind x (m)")
-    axes.set_ylabel("crosswind y (m)")
-    axes.set_zlabel("height (m)")
-    axes.set_title("Soaring cycle, coloured by specific energy")
+
+    colorbar = axes.figure.colorbar(path, ax=axes, shrink=0.6, pad=0.1)
+    colorbar.set_label("net energy rate de/dt (m/s)")
+    axes.set_xlim(*x_range)
+    axes.set_ylim(*y_range)
+    axes.set_zlim(0.0, top)
+    axes.set_box_aspect((numpy.ptp(x_range), numpy.ptp(y_range), 1.6 * top))
+    axes.set_xlabel("x, downwind (m)")
+    axes.set_ylabel("y, crosswind (m)")
+    axes.set_zlabel("h (m)")
+    axes.view_init(elev=VIEW[0], azim=VIEW[1])
+    _clean_3d(axes)
+    axes.set_title("The cycle inside the boundary layer")
     return axes
 
 
@@ -116,7 +470,7 @@ def plot_controls(trajectory, axes=None):
     """
     if axes is None:
         _, axes = pyplot.subplots(figsize=(7.0, 3.5))
-    times = numpy.asarray(trajectory.ts)
+    times = _times(trajectory)
     axes.plot(times, _series(trajectory, "cl"), color="tab:blue", label="lift coeff")
     axes.set_xlabel("time (s)")
     axes.set_ylabel("lift coefficient", color="tab:blue")
@@ -152,7 +506,7 @@ def plot_energy(trajectory, axes=None):
     """
     if axes is None:
         _, axes = pyplot.subplots(figsize=(7.0, 3.5))
-    times = numpy.asarray(trajectory.ts)
+    times = _times(trajectory)
     axes.plot(times, _series(trajectory, "h"), color="tab:green", label="height")
     axes.set_xlabel("time (s)")
     axes.set_ylabel("height (m)", color="tab:green")
@@ -203,37 +557,34 @@ def plot_energy_analysis(trajectory, axes=None):
     if axes is None:
         _, axes = pyplot.subplots(3, 1, figsize=(7.5, 9.0), sharex=True)
     axes = numpy.atleast_1d(axes)
-    times = numpy.asarray(trajectory.ts)
+    times = _times(trajectory)
     air = _series(trajectory, "specific_energy")
     ground = _series(trajectory, "ground_energy")
 
-    axes[0].plot(times, air, color="tab:blue", label="air-relative")
-    axes[0].plot(times, ground, color="tab:orange", label="inertial")
-    axes[0].fill_between(times, air, ground, color="tab:orange", alpha=0.12)
+    axes[0].plot(times, air, color=SERIES[0], label="air-relative")
+    axes[0].plot(times, ground, color=SERIES[1], label="inertial")
+    axes[0].fill_between(times, air, ground, color=SERIES[1], alpha=0.12)
     axes[0].set_ylabel("specific energy (m)")
     axes[0].set_title("Energy in both frames; the gap is the wind carried along")
     axes[0].legend(loc="best")
 
-    # The two frames swing by wildly different amounts: turning through the
-    # wind moves the ground speed far more than the airspeed, so plotted on
-    # one scale the air-relative curve would be a flat line. Each gets its
-    # own axis, coloured to match its curve.
+    # The two frames swing by very different amounts, and that difference
+    # is the point, so they share one scale: turning through the wind moves
+    # the ground speed far more than the airspeed, and an energy that
+    # oscillates with the heading is not one the bird can spend.
     axes[1].axhline(0.0, color="0.6", linewidth=0.8)
-    axes[1].plot(times, air - air[0], color="tab:blue")
-    axes[1].set_ylabel("air-relative change (m)", color="tab:blue")
-    axes[1].tick_params(axis="y", labelcolor="tab:blue")
-    inertial = axes[1].twinx()
-    inertial.plot(times, ground - ground[0], color="tab:orange")
-    inertial.set_ylabel("inertial change (m)", color="tab:orange")
-    inertial.tick_params(axis="y", labelcolor="tab:orange")
-    axes[1].set_title("Change from the start, on each frame's own scale")
+    axes[1].plot(times, air - air[0], color=SERIES[0], label="air-relative")
+    axes[1].plot(times, ground - ground[0], color=SERIES[1], label="inertial")
+    axes[1].set_ylabel("change from the start (m)")
+    axes[1].legend(loc="best", fontsize="small")
+    axes[1].set_title("Change from the start, on one scale")
 
     drag = _series(trajectory, "drag_power")
     gradient = _series(trajectory, "gradient_power")
     measured = numpy.gradient(air, times)
     axes[2].axhline(0.0, color="0.6", linewidth=0.8)
-    axes[2].plot(times, drag, color="tab:red", label="drag, always a loss")
-    axes[2].plot(times, gradient, color="tab:green", label="wind gradient")
+    axes[2].plot(times, drag, color=RATE_MAP(0.0), label="drag, always a loss")
+    axes[2].plot(times, gradient, color=RATE_MAP(1.0), label="wind gradient")
     axes[2].plot(times, drag + gradient, color="k", linewidth=1.6, label="sum")
     axes[2].plot(
         times,
@@ -264,7 +615,7 @@ def energy_budget(trajectory) -> dict[str, float]:
         The change in each frame, and the drag and wind-gradient work, all
         in m of specific energy.
     """
-    times = numpy.asarray(trajectory.ts)
+    times = _times(trajectory)
     air = _series(trajectory, "specific_energy")
     ground = _series(trajectory, "ground_energy")
     return {
@@ -447,6 +798,525 @@ def plot_cycle_schematic(axes=None):
     axes = numpy.atleast_1d(axes)
     for index, (axis, phase) in enumerate(zip(axes, PHASES, strict=True)):
         _phase_panel(axis, *phase, label_heading=index == 0)
+    return axes
+
+
+PHASE_LABELS = {
+    "windward climb": ((-0.08, 0.0, 0.02), "right"),
+    "upper turn": ((0.0, 0.0, 0.12), "center"),
+    "leeward descent": ((0.08, 0.0, 0.04), "left"),
+    "lower turn": ((0.08, 0.0, -0.08), "left"),
+}
+"""Where each phase is labelled, as a fraction of the cycle's size."""
+
+
+def _glider(axes, point, velocity, span, size, color=INK):
+    """Draw a small glider glyph: a wing along the span, a body along the path."""
+    wing = numpy.stack([point - 0.5 * size * span, point + 0.5 * size * span])
+    body = numpy.stack([point - 0.25 * size * velocity, point + 0.35 * size * velocity])
+    for piece, width in ((wing, 2.6), (body, 1.8)):
+        axes.plot(*piece.T, color=color, linewidth=width, solid_capstyle="round")
+
+
+def plot_scenario(shape: str = "S", count: int = 2, w_ref=None, axes=None):
+    """Draw the scenario: the terrestrial frame, the wind profile, a cycle.
+
+    A schematic after the opening figures of Hong et al. (2023) and
+    Koessler (2019), both of which draw an S: the sea, the frame the
+    positions are integrated in, the logarithmic wind profile drawn as
+    arrows on a vertical plane, and an idealized cycle,
+    :func:`schematic_cycle`, laid end to end, with the bird drawn at the
+    four phases that make it up. Nothing here is a result: the cycle is
+    geometry. Only the wind arrows are computed, from the same wind model
+    the dynamics use, so that they are to scale with each other.
+
+    Parameters
+    ----------
+    shape
+        ``"S"`` or ``"O"``; see :func:`schematic_cycle`.
+    count
+        The number of consecutive cycles drawn; the phases are named on the
+        first.
+    w_ref
+        The reference wind speed the arrows are drawn for; the nominal wind
+        when omitted.
+    axes
+        The 3D axis to draw on; a new one when omitted.
+
+    Returns
+    -------
+    Axes
+        The axis drawn on.
+    """
+    from gemseo_tempo.problems.albatross.model import wind_speed
+    from gemseo_tempo.problems.albatross.problem import NOMINAL_WIND
+
+    if axes is None:
+        figure = pyplot.figure(figsize=(8.0, 5.8))
+        axes = figure.add_subplot(projection="3d")
+    w_ref = NOMINAL_WIND if w_ref is None else w_ref
+    cycle = schematic_cycle(shape)
+    lap = numpy.stack([_series(cycle, name) for name in ("x", "y", "h")], axis=1)
+    shift = lap[-1] - lap[0]
+    points = numpy.concatenate([lap + number * shift for number in range(count)])
+    east, north, height = points.T
+    extent = max(numpy.ptp(east), numpy.ptp(north), 1.0)
+    x_range = numpy.array([east.min() - 0.15 * extent, east.max() + 0.15 * extent])
+    y_range = numpy.array([north.min() - 0.2 * extent, north.max() + 0.2 * extent])
+    top = 1.15 * max(height.max(), 1.0)
+    _sea(axes, x_range, y_range)
+
+    # The terrestrial frame, on the sea in front of the second cycle.
+    origin = numpy.array([x_range[1] - 0.1 * extent, y_range[1] - 0.3 * extent, 0.0])
+    for direction, label in (
+        ((0.2 * extent, 0.0, 0.0), "x"),
+        ((0.0, 0.2 * extent, 0.0), "y"),
+        ((0.0, 0.0, 0.45 * top), "h"),
+    ):
+        axes.quiver(
+            *origin, *direction, color=INK, linewidth=1.2, arrow_length_ratio=0.15
+        )
+        axes.text(*(origin + 1.12 * numpy.asarray(direction)), label, fontsize=8.5)
+
+    # The wind profile, as arrows on the back plane, to scale with each other.
+    levels = numpy.linspace(1.0, 0.95 * top, 7)
+    speeds = numpy.array([float(wind_speed(level, w_ref)) for level in levels])
+    reach = 0.2 * extent * speeds / speeds.max()
+    base = x_range[0]
+    for level, arrow_length in zip(levels, reach, strict=True):
+        axes.quiver(
+            base,
+            y_range[1],
+            level,
+            arrow_length,
+            0.0,
+            0.0,
+            color=SERIES[0],
+            linewidth=1.4,
+            arrow_length_ratio=0.18,
+        )
+    profile = numpy.linspace(0.6, 0.95 * top, 60)
+    axes.plot(
+        [base, base], [y_range[1]] * 2, [0.0, 0.95 * top], color=MUTED, linewidth=0.8
+    )
+    axes.plot(
+        base
+        + 0.2
+        * extent
+        * numpy.array([float(wind_speed(level, w_ref)) for level in profile])
+        / speeds.max(),
+        0.0 * profile + y_range[1],
+        profile,
+        color=SERIES[0],
+        linewidth=1.0,
+    )
+    axes.text(
+        base,
+        y_range[1],
+        1.04 * top,
+        f"wind W(h), {w_ref:.1f} m/s at 10 m",
+        fontsize=8.5,
+        ha="center",
+    )
+
+    # The cycles, their shadow, and the bird at each phase of every cycle.
+    axes.plot(east, north, height, color=SERIES[1], linewidth=2.2)
+    axes.plot(east, north, 0.0 * height, color=MUTED, linewidth=0.9, linestyle="--")
+    velocity, _, span = _unit_vectors(
+        _series(cycle, "gamma"), _series(cycle, "psi"), _series(cycle, "mu")
+    )
+    for number in range(count):
+        for name, index in _phases(cycle).items():
+            point = lap[index] + number * shift
+            axes.plot(*numpy.stack([point * (1, 1, 0), point]).T, color=MUTED, lw=0.6)
+            _glider(axes, point, velocity[index], span[index], 0.06 * extent)
+            if number == 0:
+                offset, align = PHASE_LABELS[name]
+                axes.text(
+                    *(point + numpy.asarray(offset) * (extent, extent, top)),
+                    name,
+                    fontsize=8.5,
+                    ha=align,
+                    bbox={
+                        "facecolor": "white",
+                        "alpha": 0.75,
+                        "edgecolor": "none",
+                        "pad": 1,
+                    },
+                )
+
+    # Where the first cycle starts, and where the same state recurs.
+    axes.scatter(*lap[[0, -1]].T, color=SERIES[1], s=22, depthshade=False)
+
+    axes.set_xlim(*x_range)
+    axes.set_ylim(*y_range)
+    axes.set_zlim(0.0, top * 1.1)
+    # With the axes hidden there is nothing to leave room for, so zoom in.
+    # Heights are stretched, as every sketch of the manoeuvre does.
+    axes.set_box_aspect((numpy.ptp(x_range), numpy.ptp(y_range), 2.5 * top), zoom=1.1)
+    axes.view_init(elev=SCENARIO_VIEW[0], azim=SCENARIO_VIEW[1])
+    axes.set_axis_off()
+    axes.set_title(
+        f"Schematic: the frame, the wind profile and {count} {shape} cycles"
+        if count > 1
+        else f"Schematic: the frame, the wind profile and an {shape} cycle"
+    )
+    return axes
+
+
+def plot_frames(cycle, w_ref=None, axes=None):
+    """Take one instant of a cycle apart, frame by frame.
+
+    Three panels, at the windward climb, where the wind pays most:
+
+    - the wind triangle seen from above, ground velocity = air-relative
+      velocity + wind, which is the relation between the terrestrial frame
+      and the wind-fixed one;
+    - the forces in the vertical plane of the air-relative velocity, per
+      unit weight: lift and drag are defined against the airspeed, and the
+      wind-fixed frame is accelerating, so a fictitious force ``-m dW/dt``
+      along x appears there, which is where the energy comes from (Koessler
+      2019, Fig. 6);
+    - the whole cycle traced in both frames: the ground track, and the
+      track in the wind-fixed frame, the ground track less the wind the bird
+      has been carried by.
+
+    Parameters
+    ----------
+    cycle
+        The cycle, a trajectory or a mapping of arrays; the wind-fixed
+        track needs ``"x_air"`` when the cycle is a mapping that carries it,
+        and is integrated from ``"wind"`` otherwise.
+    w_ref
+        The reference wind speed; read from ``cycle["w_ref"]`` when the
+        cycle carries it, the nominal wind otherwise.
+    axes
+        Three axes to draw on; a new figure when omitted.
+
+    Returns
+    -------
+    ndarray
+        The three axes drawn on.
+    """
+    from gemseo_tempo.problems.albatross.model import wind_gradient
+    from gemseo_tempo.problems.albatross.problem import NOMINAL_WIND
+    from gemseo_tempo.problems.albatross.statics import GRAVITY
+
+    if axes is None:
+        figure = pyplot.figure(figsize=(8.4, 7.8), layout="constrained")
+        grid = figure.add_gridspec(
+            2, 2, height_ratios=(1.0, 1.1), width_ratios=(1.0, 1.1)
+        )
+        axes = numpy.array(
+            [
+                figure.add_subplot(grid[0, 0]),
+                figure.add_subplot(grid[0, 1]),
+                figure.add_subplot(grid[1, :]),
+            ]
+        )
+    axes = numpy.atleast_1d(axes)
+    w_ref = _scalar(cycle, "w_ref", NOMINAL_WIND) if w_ref is None else w_ref
+    times = _times(cycle)
+    index = _phases(cycle)["windward climb"]
+    speed = _series(cycle, "V")[index]
+    gamma = _series(cycle, "gamma")[index]
+    psi = _series(cycle, "psi")[index]
+    height = _series(cycle, "h")[index]
+    wind = _series(cycle, "wind")[index]
+
+    def arrow(axis, tail, tip, color, label, where=1.0, width=2.0, size=1.0):
+        """Draw a vector and label it beside the point a fraction along it."""
+        tail = numpy.asarray(tail, dtype=float)
+        tip = numpy.asarray(tip, dtype=float)
+        axis.annotate(
+            "",
+            xy=tip,
+            xytext=tail,
+            arrowprops={"arrowstyle": "-|>", "color": color, "linewidth": width},
+        )
+        direction = tip - tail
+        # Push the label off the vector, to its left-hand side.
+        normal = numpy.array([-direction[1], direction[0]])
+        normal /= max(numpy.linalg.norm(normal), 1e-12)
+        anchor = tail + where * direction + 0.09 * size * normal
+        axis.text(*anchor, label, fontsize=8.5, color=INK, ha="center", va="center")
+
+    def frame(axis, points):
+        """Fit the limits to the vectors drawn, with room for the labels."""
+        points = numpy.asarray(points)
+        low, high = points.min(axis=0), points.max(axis=0)
+        pad = 0.3 * max(numpy.ptp(points, axis=0).max(), 1e-9)
+        axis.set_xlim(low[0] - pad, high[0] + pad)
+        axis.set_ylim(low[1] - pad, high[1] + pad)
+        axis.set_aspect("equal")
+        axis.set_xticks([])
+        axis.set_yticks([])
+
+    # (a) The wind triangle, horizontal components only.
+    air = speed * numpy.cos(gamma) * numpy.array([numpy.cos(psi), numpy.sin(psi)])
+    ground = air + (wind, 0.0)
+    triangle = axes[0]
+    size = max(numpy.linalg.norm(air), numpy.linalg.norm(ground), wind)
+    arrow(
+        triangle, (0.0, 0.0), air, SERIES[0], "air-relative,\nV cos γ", 0.5, size=size
+    )
+    arrow(triangle, air, ground, SERIES[2], "wind W(h)", 0.5, size=size)
+    arrow(triangle, ground, ground, SERIES[1], "", size=size)
+    arrow(triangle, (0.0, 0.0), ground, SERIES[1], "ground", 0.55, size=-size)
+    triangle.axhline(0.0, color=MUTED, linewidth=0.6, zorder=0)
+    triangle.text(0.0, 0.0, "  x →", color=MUTED, fontsize=8, va="bottom")
+    frame(triangle, [(0.0, 0.0), air, ground])
+    triangle.set_title("(a) The wind triangle, from above", fontsize=10)
+
+    # (b) Forces per unit weight in the vertical plane of the airspeed.
+    load = _series(cycle, "load_factor")[index]
+    drag = -_series(cycle, "drag_power")[index] / speed
+    mu = _series(cycle, "mu")[index]
+    wind_rate = float(wind_gradient(height, w_ref)) * speed * numpy.sin(gamma)
+    # Only the part of the x axis along the heading lies in this plane.
+    fictitious = -wind_rate / GRAVITY * numpy.cos(psi)
+    along = numpy.array([numpy.cos(gamma), numpy.sin(gamma)])
+    normal = numpy.array([-numpy.sin(gamma), numpy.cos(gamma)])
+    lift = load * numpy.cos(mu) * normal
+    forces = axes[1]
+    origin = numpy.zeros(2)
+    arrow(forces, origin, 0.9 * along, MUTED, "airspeed", 1.15, 1.2, size=0.0)
+    arrow(
+        forces,
+        origin,
+        lift,
+        SERIES[0],
+        f"lift L cos μ\n{load * numpy.cos(mu):.2f} mg",
+        0.6,
+        size=-6.0,
+    )
+    arrow(forces, origin, (0.0, -1.0), INK, "weight\n1 mg", 1.25, size=0.0)
+    # The two small forces decide the energy, so they are labelled off to
+    # the side, with a leader to the arrow.
+    small = (
+        (-drag * along, RATE_MAP(0.0), f"drag {drag:.2f} mg", (-0.3, -0.45), "right"),
+        (
+            numpy.array([fictitious, 0.0]),
+            SERIES[2],
+            f"−m dW/dt, {fictitious:+.2f} mg\n(the frame accelerates)",
+            (0.3, -0.45),
+            "left",
+        ),
+    )
+    for tip, color, label, place, align in small:
+        arrow(forces, origin, tip, color, "", size=0.0, width=2.4)
+        forces.annotate(
+            label,
+            xy=tip,
+            xytext=place,
+            fontsize=8.5,
+            ha=align,
+            arrowprops={"arrowstyle": "-", "color": MUTED, "linewidth": 0.6},
+        )
+    frame(
+        forces,
+        [origin, lift, (0.0, -1.0), 0.9 * along, (-1.6, -0.5), (1.9, -0.5)],
+    )
+    forces.set_xlabel("along the heading →", fontsize=8.5, color=MUTED)
+    forces.set_title("(b) Forces on the air path, per unit weight", fontsize=10)
+
+    # (c) The cycle in the terrestrial and in the wind-fixed frame.
+    east = _series(cycle, "x")
+    north = _series(cycle, "y")
+    if isinstance(cycle, Mapping) and "x_air" in cycle:
+        east_air = numpy.asarray(cycle["x_air"])
+    else:
+        carried = numpy.concatenate(
+            [
+                [0.0],
+                numpy.cumsum(
+                    0.5
+                    * (_series(cycle, "wind")[1:] + _series(cycle, "wind")[:-1])
+                    * numpy.diff(times)
+                ),
+            ]
+        )
+        east_air = east - carried
+    tracks = axes[2]
+    tracks.plot(
+        east, north, color=SERIES[1], linewidth=2.0, label="terrestrial: over the sea"
+    )
+    tracks.plot(
+        east_air,
+        north,
+        color=SERIES[0],
+        linewidth=2.0,
+        label="wind-fixed: through the air",
+    )
+    tracks.plot(east[0], north[0], marker="o", color=INK, markersize=6)
+    tracks.annotate(
+        "start",
+        (east[0], north[0]),
+        textcoords="offset points",
+        xytext=(6, -12),
+        fontsize=8.5,
+    )
+    tracks.plot(east[index], north[index], marker="o", color=SERIES[2], markersize=7)
+    tracks.plot(
+        east_air[index], north[index], marker="o", color=SERIES[2], markersize=7
+    )
+    tracks.set_aspect("equal")
+    tracks.set_xlabel("x, downwind (m)")
+    tracks.set_ylabel("y, crosswind (m)")
+    tracks.legend(loc="best", fontsize="small")
+    tracks.set_title(
+        "(c) One cycle in both frames; the dots mark the instant above", fontsize=10
+    )
+    return axes
+
+
+def plot_maneuver_pattern(cycles, count: int = 3, axes=None):
+    """Draw several consecutive cycles as a wing-span ribbon, one panel each.
+
+    After Barnes (2004) as reproduced by Koessler (2019), Figs. 2-4. A
+    periodic cycle repeats with a shift, so the optimum is laid end to end
+    ``count`` times; the ribbon follows the wing span, which makes the bank
+    visible, and is widened by a stated factor so that it reads at the
+    scale of the pattern. Its shadow falls on the sea.
+
+    Parameters
+    ----------
+    cycles
+        The cycles to draw, keyed by panel title.
+    count
+        The number of consecutive cycles.
+    axes
+        One 3D axis per cycle; a new figure when omitted.
+
+    Returns
+    -------
+    list
+        The axes drawn on.
+    """
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+    from gemseo_tempo.problems.albatross.statics import DESIGN_DEFAULTS
+
+    if axes is None:
+        figure = pyplot.figure(figsize=(6.4, 4.4 * len(cycles)), layout="none")
+        figure.subplots_adjust(left=0.08, right=0.92, bottom=0.1, top=0.95)
+        _keep_whole(figure)
+        axes = [
+            figure.add_subplot(len(cycles), 1, row + 1, projection="3d")
+            for row in range(len(cycles))
+        ]
+    for axis, color, (title, cycle) in zip(axes, SERIES, cycles.items(), strict=False):
+        east = _series(cycle, "x")
+        north = _series(cycle, "y")
+        height = _series(cycle, "h")
+        _, _, span = _unit_vectors(
+            _series(cycle, "gamma"), _series(cycle, "psi"), _series(cycle, "mu")
+        )
+        points = numpy.stack([east, north, height], axis=1)
+        shift = points[-1] - points[0]
+        shift[2] = 0.0
+        extent = max(numpy.ptp(east), numpy.ptp(north), 1.0)
+        wing_span = _scalar(cycle, "wing_span", DESIGN_DEFAULTS["wing_span"])
+        widening = 0.12 * extent / wing_span
+        half = 0.5 * wing_span * widening
+
+        laps = [points + lap * shift for lap in range(count)]
+        every = numpy.concatenate(laps)
+        margin = 0.1 * extent
+        x_range = numpy.array([every[:, 0].min() - margin, every[:, 0].max() + margin])
+        y_range = numpy.array([every[:, 1].min() - margin, every[:, 1].max() + margin])
+        _sea(axis, x_range, y_range)
+        for lap in laps:
+            left = lap + half * span
+            right = lap - half * span
+            quads = [
+                [left[k], left[k + 1], right[k + 1], right[k]]
+                for k in range(len(lap) - 1)
+            ]
+            axis.add_collection3d(
+                Poly3DCollection(
+                    quads, facecolor=color, edgecolor=color, linewidths=0.2, alpha=0.9
+                )
+            )
+            axis.plot(*lap[:, :2].T, 0.0 * lap[:, 2], color=MUTED, linewidth=0.8)
+        axis.quiver(
+            x_range[0] + margin,
+            y_range[0] + margin,
+            0.0,
+            0.25 * extent,
+            0.0,
+            0.0,
+            color=INK,
+            linewidth=1.0,
+            arrow_length_ratio=0.2,
+        )
+        axis.text(
+            x_range[0] + margin,
+            y_range[0] + margin,
+            0.05 * extent,
+            "wind",
+            fontsize=8.5,
+        )
+        axis.set_xlim(*x_range)
+        axis.set_ylim(*y_range)
+        top = 1.1 * height.max()
+        axis.set_zlim(0.0, top)
+        # A pattern is far longer than it is high: stretch the heights so
+        # that the climbs read, and say by how much.
+        stretch = max(1.5, 0.3 * max(numpy.ptp(x_range), numpy.ptp(y_range)) / top)
+        axis.set_box_aspect(
+            (numpy.ptp(x_range), numpy.ptp(y_range), stretch * top), zoom=1.25
+        )
+        # Seen from beside the direction the pattern travels, a little
+        # behind it, so that several cycles span the width of the panel.
+        travel = numpy.degrees(numpy.arctan2(shift[1], shift[0]))
+        axis.view_init(elev=30.0, azim=travel - 105.0)
+        _clean_3d(axis)
+        axis.set_xlabel("x, downwind (m)", fontsize=8)
+        axis.set_ylabel("y, crosswind (m)", fontsize=8)
+        axis.set_zlabel("h (m)", fontsize=8)
+        for ticks in (axis.xaxis, axis.yaxis):
+            ticks.set_major_locator(MaxNLocator(3))
+        axis.set_zticks([0.0, 10.0 * numpy.floor(height.max() / 10.0)])
+        axis.set_title(
+            f"{title}: {count} cycles\n"
+            f"(ribbon {widening:.1f}× the span, heights ×{stretch:.1f})",
+            fontsize=10,
+        )
+    return axes
+
+
+def plot_cycle_shapes(count: int = 3, axes=None):
+    """Draw the O and the S cycle as the literature sketches them.
+
+    Schematic, after the maneuver figures of Barnes (2004) as reproduced by
+    Koessler (2019), Figs. 2-4: :func:`schematic_cycle` of each shape, laid
+    end to end and drawn as a wing-span ribbon over the sea by
+    :func:`plot_maneuver_pattern`. Nothing here is optimized.
+
+    Parameters
+    ----------
+    count
+        The number of consecutive cycles.
+    axes
+        Two 3D axes to draw on; a new figure when omitted.
+
+    Returns
+    -------
+    list
+        The axes drawn on.
+    """
+    axes = plot_maneuver_pattern(
+        {
+            "O, a loop (schematic)": schematic_cycle("O"),
+            "S, a snake (schematic)": schematic_cycle("S"),
+        },
+        count,
+        axes,
+    )
+    # The snake travels across the wind: look down on it so that its
+    # heading reversals show.
+    axes[1].view_init(elev=45.0, azim=-70.0)
     return axes
 
 

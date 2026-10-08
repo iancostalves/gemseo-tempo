@@ -7,6 +7,18 @@ A bead slides down a wire from the origin to a target point. The shape of
 the wire is the answer; the angle it makes with the horizontal is what the
 optimizer chooses.
 
+**Assumptions.**
+1. A point mass on a wire whose shape the path angle traces; no climbing,
+   γ ∈ [0, π/2].
+2. Uniform gravity {var}`g <symbol>` along +y.
+3. Coulomb friction on the normal force the wire actually exerts, turning
+   included, {eq}`brachistochrone-normal`; the classical problem drops the
+   turning term {footcite:p}`ashby_brachistochrone_1975`, and the friction
+   variant's reference is numerical, for this model.
+4. Quadratic drag, with the coefficient of the bead's own shape,
+   {eq}`brachistochrone-drag`.
+5. The bead starts at rest at the origin.
+
 ## Kinematics
 
 ```{eval-rst}
@@ -106,17 +118,35 @@ is uncertain — about 1.0 to 1.3 with Reynolds number and surface finish —
 rather than on the lumped group, which is a geometric fact once the shape
 is fixed.
 
-## An example simulation
+## Along the wire
 
-No optimizer, no constraints: one integration of the dynamics under a
-guessed, affine path-angle law, which is what a transcription starts from
-before anything is solved.
+Integrated in time, the model above is the right description of a vehicle
+steering itself and the wrong one of a wire. Once the wire is built its
+shape is fixed, and a bead meeting more friction than it was designed for
+runs along the same wire, only slower; freezing an angle schedule in time
+and changing the friction would instead bend the bead onto another path.
+So when the constants are uncertain, on {doc}`uncertainty`, the wire is
+described by its angle along its own length and the arc length *s*
+replaces the time. With ζ = √s, which keeps the release from rest regular,
 
-```{eval-rst}
-.. plot:: _ext/gallery/brachistochrone_example_simulation.py
-   :include-source: false
+```{math}
+:label: eq-brach-wire
+
+\frac{dx}{d\zeta} = 2\zeta\cos\gamma, \quad
+\frac{dy}{d\zeta} = 2\zeta\sin\gamma, \quad
+\frac{dv}{d\zeta} = \frac{2\zeta}{v}\Big(g\,(\sin\gamma - \mu\cos\gamma)
+  - \frac{k}{m}\,v^2\Big), \quad
+\frac{dt}{d\zeta} = \frac{2\zeta}{v} .
 ```
 
-The guessed trajectory does not reach the target and is not meant to. It
-only has to leave the state space and hand the transcription a consistent
-point to refine from; {doc}`optimization` picks it up from there.
+Released from rest the speed grows like ζ, so 2ζ/v stays finite and tends
+to √(2/a) at the start, with *a* the initial acceleration; that limit is
+written out, so the integrator never divides zero by zero. The time taken
+is then a state, read at the end of the wire, and the end point is pure
+geometry: however the physics changes, the bead arrives where the wire
+goes. See {mod}`~gemseo_tempo.problems.brachistochrone.wire`.
+
+## References
+
+```{footbibliography}
+```

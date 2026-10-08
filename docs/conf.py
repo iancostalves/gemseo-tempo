@@ -39,6 +39,7 @@ extensions = [
     "matplotlib.sphinxext.plot_directive",
     "sphinxcontrib.bibtex",
     "tempo_myst",
+    "tempo_docdata",
 ]
 
 # Numbered [N] citations and a generated References page, matching the
@@ -65,9 +66,18 @@ autodoc_default_options = {"members": True, "undoc-members": False}
 autodoc_typehints = "description"
 
 myst_enable_extensions = [
+    "amsmath",
     "colon_fence",
+    "deflist",
     "dollarmath",
 ]
+
+# Equations and figures are numbered, and cross-referenced as "Eq. (N)"
+# and "Fig. N", the way a paper would; the problem pages are written as
+# short papers (see docs/problems/*).
+numfig = True
+math_numfig = True
+math_eqref_format = "Eq. ({number})"
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),

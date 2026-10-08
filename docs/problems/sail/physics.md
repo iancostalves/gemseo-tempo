@@ -7,6 +7,17 @@ A boat sails to a mark through a steady, spatially varying wind. It is a
 point over the water, steered on a heading, moving at whatever speed its
 polar allows at the wind angle that heading produces.
 
+**Assumptions.**
+1. The boat is a point that sails at its polar speed at once: a gybe or a
+   tack costs nothing but the geometry of the turn.
+2. A steady wind, uniform by default at 10 m/s blowing east; sheared and
+   circulating fields are available, see {ref}`wind-fields`.
+3. No current and no leeway: the boat goes where it points.
+4. An analytic, separable polar, V = f(|TWA|) g(TWS), symmetric between
+   tacks, authored rather than measured {footcite:p}`larsson_principles_2014`,
+   whose shape {ref}`the sail's aerodynamics explain <where-the-polar-comes-from>`.
+5. The race area bounds the boat to |y| ≤ 500 m.
+
 ## The points of sail
 
 ```{eval-rst}
@@ -15,7 +26,7 @@ polar allows at the wind angle that heading produces.
 ```
 
 The vocabulary first, because the rest of the problem is written in it.
-Adapted from the points-of-sail diagram in {cite}`ciccarella2024sailboat`,
+Adapted from the points-of-sail diagram in {footcite:t}`ciccarella_optimal_2024`,
 which sets the same terms out for the same kind of problem.
 
 The angle between the heading and the wind is the **true wind angle**, and
@@ -39,6 +50,24 @@ opposite bearing, and the true wind angle is measured against that:
 | 0 deg | head to wind, which no boat can sail |
 | 90 deg | beam reach, across the wind |
 | 180 deg | dead downwind, running |
+
+```{eval-rst}
+.. plot:: _ext/gallery/sail_angle_convention.py
+   :include-source: false
+```
+
+One Earth-fixed frame, {var}`x <symbol>` east and {var}`y <symbol>` north,
+with the start at the origin. The heading {var}`psi <symbol>` is measured
+counter-clockwise from east, so a compass course is 90° − ψ, and the true
+wind angle is read from the heading to where the wind comes from:
+
+```{math}
+:label: eq-sail-twa
+
+\mathrm{TWA} = \operatorname{wrap}\!\left(\psi - \beta_\mathrm{from}\right),
+\qquad \beta_\mathrm{from} = \operatorname{atan2}(-w_y, -w_x),
+\qquad \mathrm{TWS} = \lVert w \rVert .
+```
 
 The sign of the true wind angle says which tack the boat is on. The polar
 is symmetric in it, because the two tacks are equally fast.
@@ -80,7 +109,7 @@ so there is only one velocity to subtract:
 \mathbf{v}_B = V (\cos\psi, \sin\psi)
 ```
 
-Adapted from the wind triangle of {cite}`hong2023dynamic`, which draws the
+Adapted from the wind triangle of {footcite:t}`hong_dynamic_2023`, which draws the
 same construction for an aircraft, where it is written
 {math}`\mathbf{v}_K = \mathbf{v}_W + \mathbf{v}_A`: inertial velocity is
 wind plus airspeed. The albatross on {doc}`../albatross/physics` closes that
@@ -89,6 +118,7 @@ and dynamic soaring are the same construction read in different directions,
 which is a better reason to keep both problems in one library than that
 they are both interesting.
 
+(where-the-polar-comes-from)=
 ## Where the polar comes from
 
 ```{eval-rst}
@@ -186,16 +216,12 @@ hardcoded bound in the albatross: a modelling artefact producing numbers
 that look like physics. Neither shows up in a value; both show up in a
 derivative.
 
+(wind-fields)=
 ## Wind fields
 
 Three deterministic fields, selected by `wind_name`:
 
-```{eval-rst}
-.. plot:: _ext/gallery/sail_wind_field.py
-   :include-source: false
-```
-
-- `uniform`, blowing east at 10 m/s everywhere (drawn above).
+- `uniform`, blowing east at 10 m/s everywhere, the default.
 - `sheared`, the same direction with speed growing with `y`.
 - `gyre`, built from a streamfunction `sin(pi x / L) sin(pi y / L)`, so it
   circulates and has no divergence. Its cells are half an extent across, and
@@ -209,6 +235,11 @@ whatever the field returns — {var}`wind_scale <symbol>` on its strength and
 over a course is a feature of the course and is known, while how hard it is
 blowing on the day is not. They are the uncertainties
 {doc}`uncertainty` propagates, and the choice of which to make uncertain
-follows {cite}`ciccarella2024sailboat`, whose model likewise holds the wind
+follows {footcite:t}`ciccarella_optimal_2024`, whose model likewise holds the wind
 speed fixed and lets the direction move, on the grounds that moderate
 fluctuations in direction matter more than those in strength.
+
+## References
+
+```{footbibliography}
+```

@@ -203,7 +203,7 @@ def _cached_or_run(study, level, size, guess, index, max_iter, variant, cache, s
     # The level name is what the figure shows, not the transcription key.
     record.level = level.name
     if path is not None:
-        path.write_text(json.dumps(record.as_dict()), encoding="utf-8")
+        path.write_text(json.dumps(record.as_dict()) + "\n", encoding="utf-8")
     return record
 
 
@@ -219,7 +219,7 @@ def save_records(records, path: Path) -> None:
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps([record.as_dict() for record in records], indent=1),
+        json.dumps([record.as_dict() for record in records], indent=1) + "\n",
         encoding="utf-8",
     )
 

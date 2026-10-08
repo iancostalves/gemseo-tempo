@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 
 import jax
@@ -44,18 +45,25 @@ from gemseo_tempo.problems.albatross import gliding_baseline
 from gemseo_tempo.problems.albatross import optimal_trajectory
 from gemseo_tempo.problems.albatross import plot_controls
 from gemseo_tempo.problems.albatross import plot_cycle_schematic
+from gemseo_tempo.problems.albatross import plot_cycle_shapes
 from gemseo_tempo.problems.albatross import plot_energy
 from gemseo_tempo.problems.albatross import plot_energy_analysis
+from gemseo_tempo.problems.albatross import plot_frames
+from gemseo_tempo.problems.albatross import plot_maneuver_pattern
 from gemseo_tempo.problems.albatross import plot_pareto
 from gemseo_tempo.problems.albatross import plot_polar
+from gemseo_tempo.problems.albatross import plot_scenario
 from gemseo_tempo.problems.albatross import plot_section_trade
 from gemseo_tempo.problems.albatross import plot_trajectory
 from gemseo_tempo.problems.albatross import plot_wind_profile
+from gemseo_tempo.problems.albatross import schematic_cycle
 from gemseo_tempo.problems.albatross import soaring_cycle
 from gemseo_tempo.problems.albatross import solve_pareto_front
 from gemseo_tempo.problems.albatross import wind_gradient
 from gemseo_tempo.problems.albatross import wind_speed
+from gemseo_tempo.problems.albatross.plots import _phases
 from gemseo_tempo.problems.albatross.plots import _series
+from gemseo_tempo.problems.albatross.plots import _unit_vectors
 from gemseo_tempo.problems.albatross.problem import WING_BOUNDS
 from gemseo_tempo.problems.albatross.sequential import glide_ratio
 from gemseo_tempo.transcriptions import SingleShooting
@@ -556,24 +564,59 @@ def test_the_topology_decides_what_the_heading_does(topology, gained):
         assert numpy.ptp(heading) > 1.0
 
 
-def test_a_weave_can_sustain_itself_even_though_it_cannot_bank_energy():
-    """The weave closes an energy-neutral cycle and makes real progress.
+def test_a_weave_banks_energy_as_a_loop_does():
+    """An S pays for itself: it reverses heading, just not all the way round.
 
-    It has no heading reversal to exploit, so it cannot pay for itself the
-    way a loop does, and asked to maximize energy it converges to a cycle
-    that loses. Forced to close in speed as well it does find a neutral
-    cycle, so what fails above is the search rather than the topology.
+    It climbs while turned into the wind and descends while turned away
+    from it, which is all the gradient term asks, and comes back on the
+    heading it started on rather than a full turn later.
     """
     scenario, gemseo_scenario = create_energy_optimization(
-        size=SIZE, w_ref=STRONG_WIND, topology="weave", mission="distance"
+        size=SIZE, w_ref=STRONG_WIND, topology="weave", mission="energy"
     )
     gemseo_scenario.execute(algo_name="SLSQP", max_iter=300)
     trajectory = optimal_trajectory(scenario, gemseo_scenario)
     energy = _series(trajectory, "specific_energy")
     heading = _series(trajectory, "psi")
-    assert energy[-1] == pytest.approx(energy[0], abs=1e-3)
+    assert energy[-1] > energy[0] + 1.0
     assert heading[-1] - heading[0] == pytest.approx(0.0, abs=1e-4)
-    assert -float(gemseo_scenario.optimization_result.f_opt) > 100.0
+    assert numpy.ptp(heading) > 1.0
+
+
+@pytest.mark.parametrize("topology", ["loop", "weave"])
+def test_the_codesign_seed_closes_the_way_its_topology_does(topology):
+    """The heading offset and the seed agree, so the seed starts closed.
+
+    Were the weave checked against a full turn, its seed would miss by one;
+    were the loop checked against none, it would miss by one the other way.
+    """
+    scenario = create_codesign_scenario(size=6, topology=topology)
+    outputs = scenario.problem.jax_function(scenario.problem.input_defaults)
+    closure = numpy.asarray(outputs["constraint.cycle"])
+    assert closure.shape == (4,)
+    # Height, airspeed, climb angle and heading, in that order.
+    assert numpy.allclose(closure, 0.0, atol=1e-6)
+
+
+def test_a_displacement_closes_the_position_as_well():
+    """A hover returns to where it started over the sea, not just to its state.
+
+    The seed drifts with the wind, so the two added residuals start open by
+    that drift, less whatever displacement was asked for.
+    """
+    hover = create_codesign_scenario(size=6, displacement=(0.0, 0.0))
+    passage = create_codesign_scenario(size=6, displacement=(5.0, -3.0))
+    closures = [
+        numpy.asarray(
+            scenario.problem.jax_function(scenario.problem.input_defaults)[
+                "constraint.cycle"
+            ]
+        )
+        for scenario in (hover, passage)
+    ]
+    assert closures[0].shape == (6,)
+    assert abs(closures[0][4]) > 10.0
+    assert numpy.allclose(closures[0][4:] - closures[1][4:], (5.0, -3.0))
 
 
 # ------------------------------------------------------- the model figures
@@ -583,7 +626,6 @@ def test_the_model_figures_draw():
     assert len(plot_wind_profile()) == 2
     assert len(plot_polar()) == 2
     assert plot_section_trade() is not None
-    assert plot_cycle_schematic() is not None
 
 
 def test_the_model_figures_accept_existing_axes():
@@ -630,6 +672,121 @@ def test_the_schematic_climbs_upwind_and_descends_downwind():
     _, _, top_height = _cycle_track(legs["Upper turn"][0])
     _, _, bottom_height = _cycle_track(legs["Lower turn"][0])
     assert bottom_height < climb_height < top_height
+
+
+# ------------------------------------------------ the three-dimensional views
+
+
+def _as_arrays(trajectory, **scalars):
+    """Flatten a trajectory the way a stored result loads: arrays by name."""
+    arrays = {"ts": numpy.asarray(trajectory.ts)}
+    for group in (trajectory.states, trajectory.controls, trajectory.outputs):
+        arrays.update({name: numpy.asarray(value) for name, value in group.items()})
+    arrays.update(scalars)
+    return arrays
+
+
+@pytest.mark.parametrize(("shape", "count"), [("S", 2), ("O", 1)])
+def test_the_scenario_names_every_phase_of_the_cycle(shape, count):
+    axes = plot_scenario(shape, count, w_ref=22.0)
+    texts = [text.get_text() for text in axes.texts]
+    for phase in ("windward climb", "upper turn", "leeward descent", "lower turn"):
+        assert texts.count(phase) == 1
+    assert "wind W(h), 22.0 m/s at 10 m" in texts
+    assert f"{shape} cycle" in axes.get_title()
+
+
+@pytest.mark.parametrize(("shape", "turns"), [("O", 1.0), ("S", 0.0)])
+def test_the_schematic_cycles_only_climb_into_the_wind(shape, turns):
+    """Drawn, not solved, but drawn so that the wind gradient always pays.
+
+    The loop gains a full turn of heading and the snake gives it back; both
+    climb only while heading upwind, which makes the gradient term of the
+    energy equation non-negative all the way round.
+    """
+    cycle = schematic_cycle(shape)
+    heading = cycle["psi"]
+    assert heading[-1] - heading[0] == pytest.approx(2.0 * numpy.pi * turns)
+    assert cycle["h"][0] == pytest.approx(cycle["h"][-1])
+    assert cycle["h"].min() > 0.0
+    assert cycle["gradient_power"].min() > -1e-12
+
+
+def test_only_the_two_shapes_are_drawn():
+    with pytest.raises(ValueError, match="Unknown shape 'L'"):
+        schematic_cycle("L")
+
+
+def test_the_cycle_shapes_draw():
+    assert len(plot_cycle_shapes(count=2)) == 2
+    figure = pyplot.figure()
+    pair = [figure.add_subplot(2, 1, k + 1, projection="3d") for k in range(2)]
+    assert plot_cycle_shapes(axes=pair) is pair
+
+
+def test_the_views_accept_a_trajectory_as_well_as_stored_arrays(soaring):
+    scenario, gemseo_scenario = soaring
+    trajectory = optimal_trajectory(scenario, gemseo_scenario)
+    figure = pyplot.figure()
+    spatial = figure.add_subplot(projection="3d")
+    assert plot_scenario(axes=spatial) is spatial
+    assert len(plot_frames(trajectory)) == 3
+    _, three = pyplot.subplots(1, 3)
+    assert plot_frames(_as_arrays(trajectory), axes=three) is not None
+    figure = pyplot.figure()
+    pair = [figure.add_subplot(1, 2, k + 1, projection="3d") for k in range(2)]
+    assert plot_maneuver_pattern({"a": trajectory, "b": trajectory}, 2, pair) is pair
+    assert len(plot_maneuver_pattern({"a": _as_arrays(trajectory)})) == 1
+    with pytest.raises(KeyError, match="No series named"):
+        _series(_as_arrays(trajectory), "not_a_series")
+
+
+def test_the_frames_read_the_stored_wind_fixed_track(soaring):
+    """A stored cycle carries its wind-fixed track; it is drawn, not redone."""
+    scenario, gemseo_scenario = soaring
+    cycle = _as_arrays(optimal_trajectory(scenario, gemseo_scenario))
+    cycle["x_air"] = cycle["x"] - 1.0
+    axes = plot_frames(cycle)
+    drawn = axes[2].lines[1].get_xdata()
+    assert numpy.allclose(drawn, cycle["x"] - 1.0)
+
+
+def test_the_ribbon_is_widened_against_the_stored_span():
+    """A stored cycle carries its wing span, and the stated widening uses it."""
+
+    def widening(span):
+        axes = plot_maneuver_pattern({"a": {**schematic_cycle("O"), "wing_span": span}})
+        return float(re.search(r"ribbon ([0-9.]+)×", axes[0].get_title()).group(1))
+
+    assert widening(2.0) == pytest.approx(2.0 * widening(4.0), rel=0.05)
+
+
+def test_the_ribbon_follows_the_wing_and_the_bank_tilts_it():
+    """The span is level with no bank, and banking rolls it about the path."""
+    velocity, lift, span = _unit_vectors([0.0, 0.0], [0.0, 0.0], [0.0, 0.5])
+    assert numpy.allclose(span[0], (0.0, 1.0, 0.0))
+    assert numpy.allclose(lift[0], (0.0, 0.0, 1.0))
+    for vectors in (velocity, lift, span):
+        assert numpy.allclose(numpy.linalg.norm(vectors, axis=1), 1.0)
+    assert numpy.allclose(numpy.sum(velocity * span, axis=1), 0.0)
+    assert numpy.allclose(numpy.sum(lift * span, axis=1), 0.0)
+    # A positive bank leans the lift to the left, the way the heading turns.
+    assert lift[1][1] > 0.0
+
+
+def test_a_cycle_without_a_windward_climb_still_has_its_phases():
+    """A glide never climbs into the wind; the phases fall back to the gain."""
+    count = 8
+    cycle = {
+        "gamma": -0.1 * numpy.ones(count),
+        "psi": numpy.zeros(count),
+        "h": numpy.linspace(20.0, 5.0, count),
+        "gradient_power": numpy.arange(count, dtype=float),
+    }
+    phases = _phases(cycle)
+    assert phases["windward climb"] == count - 1
+    assert phases["upper turn"] == 0
+    assert phases["lower turn"] == count - 1
 
 
 # ------------------------------------------- aspect ratio reaches the lift

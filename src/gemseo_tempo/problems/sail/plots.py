@@ -33,12 +33,13 @@ from gemseo_tempo.problems.sail.wind import EXTENT  # noqa: E402
 
 
 def plot_angle_convention(axes=None):
-    """Draw the heading, true wind angle, and the no-go cone.
+    """Draw the Earth frame, the heading and the true wind angle.
 
-    Pure geometry, no data: an arrow for the wind (blowing *towards*, by
-    the field's own convention), an arrow for a heading inside the no-go
-    cone and one outside it, and the angle each subtends against the
-    "from" bearing the wind is named by.
+    Pure geometry, no data. The frame is east-north with the heading
+    measured counter-clockwise from east; the wind is drawn blowing
+    *towards* east, as the field gives it, and named for the opposite
+    bearing it comes *from*. The true wind angle is the arc from the
+    heading round to that bearing, and the no-go cone sits around it.
 
     Parameters
     ----------
@@ -50,57 +51,99 @@ def plot_angle_convention(axes=None):
     Axes
         The axis drawn on.
     """
+    from matplotlib.patches import Arc
+
     from gemseo_tempo.problems.sail.polar import NO_GO_ANGLE
 
     if axes is None:
-        _, axes = pyplot.subplots(figsize=(4.8, 4.8))
-    axes.plot([0.0], [0.0], marker="o", markersize=8.0, color="black")
+        _, axes = pyplot.subplots(figsize=(6.4, 4.6))
 
-    # The wind blows towards the east; it is named for the opposite,
-    # westward, bearing.
-    axes.annotate(
-        "",
-        xy=(1.0, 0.0),
-        xytext=(0.0, 0.0),
-        arrowprops={"arrowstyle": "-|>", "color": "tab:blue", "linewidth": 1.8},
-    )
-    axes.text(
-        1.05, 0.0, "wind\n(blows towards)", color="tab:blue", fontsize=9, va="center"
-    )
-
-    cone = numpy.radians(NO_GO_ANGLE)
-    for angle, label, color in (
-        (numpy.pi - cone / 2, "inside the no-go cone", "tab:red"),
-        (numpy.pi / 2, "a beam reach", "tab:green"),
-    ):
+    def arrow(tip, tail=(0.0, 0.0), color="black", width=1.6, style="-|>", **extra):
         axes.annotate(
             "",
-            xy=(0.8 * numpy.cos(angle), 0.8 * numpy.sin(angle)),
-            xytext=(0.0, 0.0),
-            arrowprops={"arrowstyle": "-|>", "color": color, "linewidth": 1.6},
-        )
-        axes.text(
-            0.85 * numpy.cos(angle),
-            0.85 * numpy.sin(angle),
-            label,
-            color=color,
-            fontsize=8.5,
-            ha="center" if abs(numpy.cos(angle)) < 0.3 else "left",
+            xy=tip,
+            xytext=tail,
+            arrowprops={
+                "arrowstyle": style,
+                "color": color,
+                "linewidth": width,
+                **extra,
+            },
         )
 
-    wedge_angles = numpy.linspace(numpy.pi - cone, numpy.pi + cone, 40)
+    # The Earth frame: x east, y north, origin at the start.
+    arrow((1.25, 0.0), color="0.45", width=1.0)
+    arrow((0.0, 1.05), color="0.45", width=1.0)
+    axes.text(1.27, -0.02, "x, east", fontsize=9, color="0.3", va="top")
+    axes.text(0.03, 1.06, "y, north", fontsize=9, color="0.3")
+
+    # The wind blows towards +x and is named for where it comes from.
+    for height in (0.84, 0.98, 1.12):
+        arrow((-0.72, height), (-1.18, height), color="tab:blue", width=1.4)
+    axes.text(-1.2, 1.19, "wind blows towards +x", fontsize=9, color="tab:blue")
+    axes.plot([0.0, -1.1], [0.0, 0.0], color="tab:blue", linestyle="--", lw=1.0)
+    axes.text(-1.12, 0.04, "comes from", fontsize=8.5, color="tab:blue")
+
+    # The no-go cone, around the direction the wind comes from.
+    cone = numpy.radians(NO_GO_ANGLE)
+    wedge = numpy.linspace(numpy.pi - cone, numpy.pi + cone, 40)
     axes.fill(
-        numpy.concatenate([[0.0], 0.45 * numpy.cos(wedge_angles)]),
-        numpy.concatenate([[0.0], 0.45 * numpy.sin(wedge_angles)]),
+        numpy.concatenate([[0.0], 0.62 * numpy.cos(wedge)]),
+        numpy.concatenate([[0.0], 0.62 * numpy.sin(wedge)]),
         color="tab:red",
-        alpha=0.15,
+        alpha=0.13,
     )
-    axes.text(-0.5, 0.05, f"+/-{NO_GO_ANGLE:.0f} deg", fontsize=8, color="tab:red")
+    axes.text(
+        -0.66,
+        -0.47,
+        f"no-go cone, TWA within ±{NO_GO_ANGLE:.0f}°",
+        fontsize=8.5,
+        color="tab:red",
+    )
 
-    axes.set_xlim(-1.3, 1.5)
-    axes.set_ylim(-1.1, 1.1)
+    # A heading on each tack, as the downwind optimum sails them.
+    heading = numpy.radians(26.0)
+    arrow((numpy.cos(heading), numpy.sin(heading)), width=2.0)
+    axes.text(
+        1.02 * numpy.cos(heading),
+        1.02 * numpy.sin(heading) + 0.03,
+        "heading",
+        fontsize=9,
+    )
+    arrow(
+        (numpy.cos(heading), -numpy.sin(heading)),
+        color="0.55",
+        width=1.2,
+        linestyle="dashed",
+    )
+    axes.text(
+        1.02 * numpy.cos(heading),
+        -1.02 * numpy.sin(heading) - 0.08,
+        "other tack: TWA > 0, starboard",
+        fontsize=8.5,
+        color="0.4",
+    )
+
+    # psi from east, and the true wind angle from the heading to the wind.
+    axes.add_patch(Arc((0.0, 0.0), 0.7, 0.7, theta1=0.0, theta2=26.0, lw=1.2))
+    axes.text(0.38, 0.07, "ψ", fontsize=11)
+    axes.add_patch(
+        Arc((0.0, 0.0), 1.1, 1.1, theta1=26.0, theta2=180.0, lw=1.2, color="tab:purple")
+    )
+    axes.text(
+        -0.62,
+        0.62,
+        "TWA = ψ − (wind from)\n= −154°: port tack",
+        fontsize=8.5,
+        color="tab:purple",
+        ha="center",
+    )
+    axes.plot([0.0], [0.0], marker="o", markersize=7.0, color="black")
+
+    axes.set_xlim(-1.3, 1.75)
+    axes.set_ylim(-0.62, 1.28)
     axes.set_aspect("equal")
-    axes.set_title("True wind angle and the no-go cone")
+    axes.set_title("Earth frame, heading and true wind angle")
     axes.set_xticks([])
     axes.set_yticks([])
     for spine in axes.spines.values():

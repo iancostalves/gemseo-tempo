@@ -3,364 +3,238 @@
 ```{variable-context} gemseo_tempo.problems.albatross.model:REGISTRY
 ```
 
-## What is the weakest wind it could live in?
+## Deterministic optimal control
 
-Now everything is free, and the cycle has to close completely, in speed as
-well as height and attitude. The wind gradient must pay for the drag exactly,
-and the objective is the wind itself.
+:::{admonition} Takeaway: the deterministic problem
+:class: tip
 
-| what is free | minimum `w_ref` |
-| --- | --- |
-| nothing (a fixed, prescribed cycle) | 17.7 m/s |
-| the cycle, its duration and its start | 10.18 m/s |
-| all of that plus the wing | **8.65 m/s** |
+- **Transcription:** collocation, which converges in about fifty iterations
+  and seconds. Single shooting is slow and badly conditioned over nine
+  seconds of unstable flight, and indirect shooting fails on the active
+  path constraints.
+- **Discretization:** twenty to forty segments, from several starts for the
+  shapes, and co-design started from the sequential wing.
+- **Differentiation:** under shooting, forward mode through the dynamics, the
+  stage that sets the cost: exact, lean in memory and flat in the number of
+  constraints. Finite differences batched into one call cost the same, with
+  six digits rather than fifteen. Reverse mode through the checkpointing
+  adjoint is faster with many controls but not exact here.
+:::
 
-Letting the optimizer choose the cycle rather than fly a prescribed one is
-worth 43%. Adding the wing to the problem is worth a further **15%**, at
-0.628 m2 spanning 3.70 m and the thinnest section available: an aspect ratio
-of 21.8, a glide ratio of 24.3, and 9.1 kg of bird. The area is the first wing
-variable in three passes to settle between its bounds rather than on one.
+### Variants
 
-The 10.18 m/s figure is the one to compare against the literature, since it is
-the real bird's wing: published estimates of the wind an albatross needs sit
-in the same range.
+One method throughout: collocation on twenty segments, solved by SLSQP from
+a cycle built by inverse dynamics, with the real bird's wing. The objective
+changes; so does the shape, O or S, through the heading offset of the
+periodicity constraint:
 
-Convergence is solid. Periodicity residuals come out at machine precision and
-the collocation defects below 1e-6, with the answer stable across
-discretization:
-
-| segments | minimum `w_ref` | time |
+| objective | O | S |
 | --- | --- | --- |
-| 15 | 7.21 m/s | 12 s |
-| 20 | 7.19 m/s | 12 s |
-| 30 | 7.19 m/s | 23 s |
+| weakest wind a cycle closes in | {docvalue}`albatross/shapes.json:loop.minimum_wind:.2f` m/s | {docvalue}`albatross/shapes.json:weave.minimum_wind:.2f` m/s |
+| most energy banked, at {docvalue}`albatross/missions.json:w_ref:.0f` m/s | {docvalue}`albatross/missions.json:loop_energy.air_change:+.2f` m | {docvalue}`albatross/missions.json:weave_energy.air_change:+.2f` m |
+| furthest downwind in a neutral cycle | {docvalue}`albatross/missions.json:loop_distance.distance:.0f` m | {docvalue}`albatross/missions.json:weave_distance.distance:.0f` m |
+| fastest over {docvalue}`albatross/missions.json:target_distance:.0f` m | {docvalue}`albatross/missions.json:loop_time.objective:.2f` s | {docvalue}`albatross/missions.json:weave_time.objective:.2f` s |
 
-(Those are with wider design bounds than the default; see
-{doc}`../../guides/scenario` for how bounds are declared.)
+The weakest wind is the problem's defining number. For each shape it is the
+best of nine starts, the default guess and eight from a Latin hypercube over
+period, airspeed, mean height and height swing: the S needs about 3% less
+wind than the O, and
+{docvalue}`albatross/shapes.json:weave.at_best:d` and
+{docvalue}`albatross/shapes.json:loop.at_best:d` unrelated starts land on
+the same answers to within 0.1%. Both, re-flown densely:
 
-## How much can a fixed cycle gain?
-
-Before letting the optimizer choose the cycle, it is worth asking what a
-*prescribed* one can already do. The wind and the bird are fixed. The bird
-must return to the height and attitude it started at, but not to the same
-speed, so anything it extracts shows up as airspeed. Sweeping the wind, over
-a nine-second cycle:
-
-| `w_ref` (m/s) | drag work (m) | gradient work (m) | net (m) |
-| --- | --- | --- | --- |
-| 0 | −18.16 | 0.00 | −18.13 |
-| 8 | −31.56 | +15.60 | −15.67 |
-| 12 | −38.04 | +28.20 | −9.78 |
-| 16 | −44.58 | +41.27 | −3.26 |
-| 18 | −50.69 | +51.13 | **+0.13** |
-| 22 | −58.32 | +65.93 | +7.26 |
-| 26 | −68.04 | +81.87 | +14.44 |
-
-With no wind the cycle is a pure glide and loses 18.1 m of specific energy,
-all of it to drag. As the wind strengthens the gradient work grows faster than
-the drag does, and the two cross at **`w_ref` = 17.9 m/s**: below that the
-prescribed cycle cannot sustain itself, above it the bird gains. This is the
-17.7 m/s "nothing free" row above, and the gap between it and 10.18 m/s is
-exactly what letting the optimizer choose the cycle buys.
-
-## What the optimizer is actually handed
-
-Problem statements written by hand go stale. `describe_problem` reads them off
-the transcribed problem instead, measuring the constraint sizes by evaluating
-it once, so what follows is the problem that will be solved:
-
-```python
-from gemseo_tempo.scenario.description import describe_problem
-
-print(describe_problem(scenario, formulation))
+```{eval-rst}
+.. plot:: _ext/gallery/albatross_shapes.py
+   :include-source: false
 ```
 
-At 20 segments the three formulations come out as:
+The O drifts downwind, the circumnavigation of Barnes's catalogue; the S
+snakes across the wind with its heading swinging through
+{docvalue}`albatross/shapes.json:weave.heading_swing:.0f*57.29578`°.
+Asking either to end where it started, a hover, needs a different cycle:
+shortening the passage step by step, the wind needed climbs steeply and the
+solver stalls at
+{docvalue}`albatross/shapes.json:weave.hover.-1.fraction:.0%` of the drift.
 
-| | design variables | scalars | constraints |
+**Verification.** Hong et al. solve the weakest-wind problem for a bird with
+a fixed polar {footcite:p}`hong_dynamic_2023`, and their cycle is an S: their
+heading closes without a turn. With their bird, polar and limits in place of
+the statics chain:
+
+| | Hong et al. (2023), an S | here, an S | here, an O |
 | --- | --- | --- | --- |
-| A, energy | control `C_L` and `mu`, state nodes | 162 | cycle (3), lift, load, height, defects |
-| B, sizing | `wing_area`, `wing_span`, `section` | 3 | none: no cycle is flown |
-| C, co-design | all of A plus `t_f`, `w_ref`, the wing | 170 | cycle (4), lift, load, height, defects |
+| minimum wind | {docvalue}`albatross/hong_2023.json:reference.minimum_wind:.2f` m/s | {docvalue}`albatross/hong_2023.json:weave.minimum_wind:.2f` m/s | {docvalue}`albatross/hong_2023.json:loop.minimum_wind:.2f` m/s |
+| period | 7.7–9.4 s | {docvalue}`albatross/hong_2023.json:weave.runs.1.period:.2f` s | {docvalue}`albatross/hong_2023.json:loop.runs.1.period:.2f` s |
 
-The counts are worth seeing. A single `state.h` is one name covering a node
-per segment, and a path constraint is one name covering a value per save
-point, so a problem that reads as a handful of lines is a few hundred scalars
-by the time the optimizer sees it. Note also that `state.h` has one fewer
-component under A than under C: A pins its initial state, C frees it.
+The S agrees with theirs to
+{docvalue}`albatross/hong_2023.json:weave.difference:+.2%`, and the O needs
+{docvalue}`albatross/hong_2023.json:loop.difference:+.1%` more, the same
+ordering found above. Two further checks close the budget: re-flying the
+optimal controls through a tight integrator departs from the collocation
+nodes by at most
+{docvalue}`albatross/dense_check.json:codesign.departure.x:.1f` m, and the
+energy the gradient supplies matches the drag and the change in energy to
+integration accuracy:
 
-## What the bird is flying for
-
-Minimum wind is a strange thing to want. A real albatross is going somewhere,
-so formulation A takes a `mission`:
-
-| mission | closes on | maximizes | result at `w_ref` = 22 m/s |
-| --- | --- | --- | --- |
-| `energy` | `h, gamma, psi` | final specific energy | +7.58 m banked, 229 m covered |
-| `distance` | `h, V, gamma, psi` | ground made good | 334 m in 9 s, exactly neutral |
-| `time` | `h, V, gamma, psi` | minus the duration | 300 m in 8.36 s, exactly neutral |
-
-`energy` leaves speed open, so the surplus is banked as airspeed. The other
-two close in speed as well, making the cycle exactly energy-neutral, and spend
-the surplus on progress instead: 334 m against 229 m, a 46% gain.
-
-**And this is where `C_L,max` earns its keep.** The section trade looked
-one-sided above, with the thinnest section winning on minimum wind. Under a
-mission that rewards progress it is not one-sided at all:
-
-| section | glide ratio | `C_L,max` | min wind | distance in 9 s | time for 300 m |
-| --- | --- | --- | --- | --- | --- |
-| 0.00 | 27.8 | 1.20 | **7.88** | 342.9 | 8.248 |
-| 0.25 | 25.8 | 1.35 | 8.30 | 351.5 | 8.085 |
-| 0.50 | 24.2 | 1.50 | 8.70 | **355.2** | **7.983** |
-| 0.75 | 22.9 | 1.65 | 9.09 | 354.4 | **7.983** |
-| 1.00 | 21.7 | 1.80 | 9.47 | 351.4 | 8.068 |
-
-Minimum wind wants the thinnest section available and pins the bound. Both
-cross-country missions have an **interior optimum** near section 0.5 to 0.75,
-which is a maximum lift coefficient of 1.50 to 1.65: about where a real
-albatross sits.
-
-The mechanism is visible in the cycle. More `C_L,max` turns tighter, and the
-turn radius falls from 32 m at section 0 to 23 m at section 1. Minimum wind
-does not care, because nothing in it penalizes a wide cycle and the low-lift
-bird simply flies faster, 21.3 m/s against 18.1, and draws a bigger loop. A
-mission that has to *get somewhere* does care, because a wide turn spends
-distance on turning.
-
-So the cruise-against-manoeuvre trade is real, and it stays invisible until
-the mission is one that values manoeuvring. Optimizing for the weakest wind
-gives a glider; optimizing for cross-country speed gives something much closer
-to the bird.
-
-(the-shape-of-the-cycle)=
-## The shape of the cycle
-
-The heading can come back to where it started in two ways, and the `offsets`
-mapping on `PeriodicityConstraint` is the only thing that distinguishes them:
-a **loop** gains a full turn, a **weave** gains nothing.
-
-| topology | mission | result |
-| --- | --- | --- |
-| loop | `energy` | +7.24 m banked, 230 m covered |
-| loop | `distance` | 332 m, neutral |
-| weave | `energy` | **-9.80 m**: it loses |
-| weave | `distance` | 312 m, neutral |
-
-A weave has no heading reversal to exploit, and asked to maximize energy it
-converges to a cycle that loses nearly 10 m. Forced to close in speed as well
-it does find a neutral cycle, covering 94% of what the loop manages, so what
-fails in the first case is the search rather than the topology.
-
-(formulation-b-what-did-you-size-it-for)=
-## Formulation B: what did you size it for?
-
-Formulation C optimizes the wing and the cycle at once. That is not how the
-work is usually organized: the vehicle is settled first, against figures of
-merit an engineer can reason about, and only then is a trajectory flown on it.
-Formulation B is that route, and it comes in two versions, because the merit
-you pick is an assumption about the mission whether you write it down or not.
-
-**B-cruise** sizes for the glide ratio alone. This is what conventional
-practice does when nobody states the assumption: the best-gliding wing is
-taken to be the best wing.
-
-**B-dynamics** sizes for gliding *and* turning, using a proxy computable from
-the wing alone so it never flies the cycle: the load factor the wing can pull
-at a reference airspeed, `n = 0.5 rho V^2 S C_L,max / (m g)`, which is what
-sets the minimum turn radius. The two terms carry equal weight, which is a
-modelling choice and is stated as one.
-
-Each is then flown on **both** missions, against simultaneous co-design:
-
-| sized for | area | AR | glide | `n_max` | min wind | vs C | crossing | vs C |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| cruise | 0.500 | 27.4 | 26.0 | 1.38 | 8.90 | +2.9% | 8.48 s | +6.5% |
-| dynamics | 0.900 | 9.7 | 14.2 | 5.84 | 14.00 | +61.8% | 11.13 s | +39.8% |
-| best blend | 0.900 | 15.2 | 21.8 | 3.47 | 9.15 | +5.8% | 8.26 s | +3.7% |
-| **co-design** | **0.628** | 21.8 | 24.3 | 2.02 | **8.65** | ref | **7.96 s** | ref |
-
-Three things fall out of that table.
-
-**Cruise sizing is nearly right for the wrong reason.** Minimum wind is a
-cruise-like objective, so a wing sized for gliding is only 2.9% off it. Ask
-the same bird to *get somewhere* and the gap more than doubles. The assumption
-that cruise is the goal is invisible until the mission stops being cruise.
-
-**Sizing hard for the manoeuvre is far worse than sizing for cruise.** The
-equal-weighted proxy produces a stubby, thick-sectioned bird that turns
-beautifully and glides at 14. Turning matters, but not that much, and a proxy
-has no way of knowing how much.
-
-**No weighting reaches the co-design wing at all.** This is the part that
-makes the argument structural rather than a matter of tuning. The vehicle
-merit is close to linear in its normalized quantities over a box, so its
-optimum sits at a **vertex** and jumps between vertices as the weights move:
-the area goes 0.500, 0.500, 0.900, 0.900 as the turn weight is swept, never
-stopping in between. The mission's optimum is **interior**, at 0.628. There is
-no weight that lands there, so no amount of hindsight would let the sequential
-route reproduce the co-design answer. This is exactly the setting the
-{ref}`Multiobjective optimization under uncertainty <multiobjective-optimization-under-uncertainty>`
-subsection below asks the next question of: does the forecast error the two
-wings face change this ranking?
-
-## What compiling costs
-
-| size | variables | compile | compiled | eager | speedup | crossover |
-| --- | --- | --- | --- | --- | --- | --- |
-| 8 | 71 | 0.27 s | 0.9 ms | 55.0 ms | 58x | 5 |
-| 16 | 135 | 0.27 s | 1.1 ms | 55.6 ms | 52x | 5 |
-
-Compiling pays within five evaluations here too; see
-{doc}`../../guides/benchmarking` for the general shape of this measurement
-and {doc}`../brachistochrone/index` for the same table on the smallest problem.
-
-## Optimization benchmarks
-
-```{image} ../../_data/albatross/optimizer_study.png
-:alt: Optimizer benchmark on the albatross
+```{eval-rst}
+.. plot:: _ext/gallery/albatross_energy_analysis.py
+   :include-source: false
 ```
 
-Reused from `benchmarks/baselines/albatross.json`. The albatross offers only
-collocation, so it carries no transcription study: a study that varies one
-thing needs at least two levels of it, and this problem does not have a
-second. See {doc}`../../guides/benchmarking` for what that comparison measures
-and how the baseline is kept current.
+### Transcriptions
 
-## Weaker wind or a faster crossing
+The weakest-wind O with the real wing, by each transcription, with SLSQP:
 
-The two things a soaring bird might want cannot both be had, and mNBI draws
-the trade directly rather than scalarizing it. Over a 300 m crossing:
-
-| `w_ref` needed | crossing time | cross-country speed |
-| --- | --- | --- |
-| 10.97 m/s | 15.56 s | 19.3 m/s |
-| 12.06 m/s | 11.91 s | 25.2 m/s |
-| 16.45 m/s | 9.41 s | 31.9 m/s |
-| 23.06 m/s | 7.67 s | 39.1 m/s |
-| 31.14 m/s | 6.45 s | 46.5 m/s |
-| 40.00 m/s | 5.50 s | 54.6 m/s |
-
-The low end is worth a second look: **10.97 m/s to cross 300 m per cycle,
-against 8.65 m/s merely to sustain one.** Covering ground costs more than
-staying airborne, which is the difference between a bird that survives a calm
-and a bird that gets anywhere. `plot_pareto` draws the curve; anything marked
-on it has to be measured in the same two objectives, since a minimum wind
-taken without a distance requirement is a different quantity and will appear
-to dominate the front.
-
-## The time budget
-
-The sprint asks for formulation C under five minutes on one core with
-fixed-step integration. It is not close:
-
-| integration | minimum `w_ref` | time |
-| --- | --- | --- |
-| adaptive, rtol 1e-8 | 8.6332 m/s | 6.6 s |
-| fixed step, 1/200 | 8.6332 m/s | 3.7 s |
-
-Identical answers, and fixed stepping is the faster of the two, because an
-adaptive controller spends steps chasing a tolerance the optimizer never asked
-for. Eighty times inside the budget.
-
-## Discussion
-
-Findings about this library, surfaced by the albatross, that do not belong
-under the physics, the optimization or the uncertainty.
-
-### Are these optima real?
-
-Every number above comes from one inverse-dynamics guess, which is a strong
-start and therefore a suspicious one. GEMSEO's `MultiStart` over a Latin
-hypercube is the check:
-
-| start | minimum `w_ref` |
-| --- | --- |
-| seeded, inverse dynamics | 8.6486 m/s |
-| four random starts | 8.6400 m/s |
-
-Random search does slightly better, by 0.10%, so the seeded optimum is
-marginally local. The margin is small enough that the basin is clearly broad
-rather than the guess being wrong, and it is reported rather than tidied away.
-
-(three-things-that-had-to-be-got-right)=
-### Three things that had to be got right
-
-**A heading is periodic only modulo a turn.** A loop comes back to the same
-direction of flight having gained a full turn. Demanding plain equality
-forbids the very cycle the problem is about, and the residual sits stubbornly
-at 6.283. `PeriodicityConstraint` therefore takes an `offsets` mapping.
-
-**The guess is built, not picked.** A soaring cycle is not something an
-optimizer stumbles onto. `soaring_cycle` chooses the shape the energy equation
-asks for, then inverts the two rotational equations of motion for the lift
-and bank that would fly it, which is exactly the construction the example
-simulation under Physics draws. That lands the guess with collocation
-defects already near zero everywhere except the speed equation.
-
-**Finite-difference checks need fixed-step integration.** The split assembly is
-verified with `check_jacobian`, and adaptive stepping changes its step sequence
-discontinuously as the inputs move, which swamps a 1e-7 probe. Passing
-`DiffraxIntegrator(dt0=0.01)` makes the whole map smooth, and all three split
-disciplines then agree to 1e-3.
-
-### Closing the cycle with an inner solve
-
-The guess satisfies every equation of motion except the one for speed, and
-speed is also the state whose periodicity is hardest to close. That suggests
-a nested formulation: solve for the initial speed **inside** each evaluation,
-so the outer problem loses a design variable and an equality.
-
-The mechanism works. The residual `r(V0) = V(t_f; V0) - V0` is solved by
-Newton, and the derivative comes from the implicit function theorem rather
-than from differentiating through the iterations, which keeps the gradient
-exact and its cost independent of how many steps were taken. Against a central
-difference the two agree to five significant figures.
-
-What stops it being usable as it stands is physical rather than numerical:
-
-| start | lowest height | physical | converged |
-| --- | --- | --- | --- |
-| 28 m/s | −14.9 m | no | no |
-| 32 m/s | −12.0 m | no | no |
-| 34 m/s | −6.8 m | no | yes |
-| 36 m/s | +2.0 m | yes | yes |
-| 40 m/s | +8.3 m | yes | yes |
-
-Below about 35 m/s the prescribed cycle flies the bird under the water. The
-wind profile's smooth floor keeps the arithmetic finite, so what comes back is
-a number computed from a trajectory that does not exist, and the integration
-underneath the root finder fails outright rather than returning a poor value.
-Inside an optimizer that is a discipline which did not evaluate.
-
-So the inner solve is conditionally robust, and the condition is now measured
-rather than discovered: `robustness_map` reports where a start can be taken
-from. A formulation built on this must bracket the root or start from the
-inverse-dynamics speed, which is already in the right region. That formulation
-is the remaining step, and it is not attempted here on the strength of a solve
-that fails outside a region this narrow.
-
-### Still open
-
-**The span still wants everything it is allowed**, even though the area no
-longer does. Aspect ratio is bought two ways here, by lengthening the span and
-by shrinking the area, and only the second now carries a penalty: a smaller
-area means a smaller chord and a worse Reynolds number, which is what pulled
-the area off its bound. A longer span at fixed area does the same thing to the
-chord, so the two are not independent, and what actually limits a real bird's
-span, structural and otherwise, is still not in this model.
-
-**The wing mass law barely matters.** Growing as the square root of aspect
-ratio it changed nothing at all, and the bending law `AR^1.5 sqrt(S)` moves
-the answer far less than the Reynolds penalty does. The interesting physics
-here turned out to be aerodynamic rather than structural, which was not the
-expectation going in.
-
-## Reproducing everything here
-
-```bash
-python examples/albatross/run_albatross.py --output figures/albatross
+```{eval-rst}
+.. plot:: _ext/gallery/albatross_transcriptions.py
+   :include-source: false
 ```
 
-Every number on this page is measured at 16 collocation segments unless the
-table says otherwise, with the model as of the third pass of Sprint 9.
+| transcription | grid | minimum wind | iterations | wall time |
+| --- | --- | --- | --- | --- |
+| shooting | 10 | {docvalue}`albatross/transcriptions.json:rows.0.objective:.3f` m/s | {docvalue}`albatross/transcriptions.json:rows.0.calls:d` | {docvalue}`albatross/transcriptions.json:rows.0.seconds:.0f` s |
+| shooting | 20 | {docvalue}`albatross/transcriptions.json:rows.1.objective:.3f` m/s | {docvalue}`albatross/transcriptions.json:rows.1.calls:d` | {docvalue}`albatross/transcriptions.json:rows.1.seconds:.0f` s |
+| collocation | 20 | {docvalue}`albatross/transcriptions.json:rows.4.objective:.3f` m/s | {docvalue}`albatross/transcriptions.json:rows.4.calls:d` | {docvalue}`albatross/transcriptions.json:rows.4.seconds:.0f` s |
+| collocation | 40 | {docvalue}`albatross/transcriptions.json:rows.5.objective:.3f` m/s | {docvalue}`albatross/transcriptions.json:rows.5.calls:d` | {docvalue}`albatross/transcriptions.json:rows.5.seconds:.0f` s |
+| indirect | none | not converged | {docvalue}`albatross/transcriptions.json:rows.6.calls:d` | {docvalue}`albatross/transcriptions.json:rows.6.seconds:.0f` s |
+
+Collocation converges in about fifty iterations on every grid, in seconds,
+to answers that agree to a fraction of a percent as the grid is refined.
+Single shooting integrates nine seconds of unstable flight at every call,
+which makes it slow and badly conditioned: on ten intervals it finds a cycle
+1% cheaper than collocation's, a different local optimum, but on twenty and
+forty it stops at the iteration budget short of both. It also checks the
+path constraints only where it saves the trajectory, so they are checked at
+a hundred points: at one per interval, the cycle passed through the sea
+between them and claimed 1.6 m/s.
+
+Indirect shooting is set up automatically from the collocation optimum:
+costates from JAX, the periodicity and the wind as extra conditions, the
+path constraints as a penalty, and ten shooting segments to keep the
+costates from growing. It does not converge. The lift limit and the height
+floor are active over long arcs of the optimal cycle, where the necessary
+conditions change form, and the penalty that stands in for them leaves the
+residual at {docvalue}`albatross/transcriptions.json:rows.6.residual:.1f`, from
+{docvalue}`albatross/transcriptions.json:rows.6.seed_residual:.1f` at the seed. Direct methods treat
+those constraints for what they are, which is why collocation is the
+default.
+
+### Design strategies
+
+Three ways of arriving at the bird, each flown as an O and as an S: the
+real wing with only the cycle optimized; the sequential route, which sizes
+the wing for its glide ratio first and only then optimizes the cycle on it;
+and co-design, which optimizes both at once, started from the sequential
+answer.
+
+| wing | aspect ratio | glide ratio | O | S |
+| --- | --- | --- | --- | --- |
+| the real bird's | {docvalue}`albatross/design_strategies.json:loop_fixed.aspect_ratio:.1f` | {docvalue}`albatross/design_strategies.json:loop_fixed.glide_ratio:.1f` | {docvalue}`albatross/design_strategies.json:loop_fixed.minimum_wind:.2f` m/s | {docvalue}`albatross/design_strategies.json:weave_fixed.minimum_wind:.2f` m/s |
+| sized for glide, then flown | {docvalue}`albatross/design_strategies.json:loop_sequential.aspect_ratio:.1f` | {docvalue}`albatross/design_strategies.json:loop_sequential.glide_ratio:.1f` | {docvalue}`albatross/design_strategies.json:loop_sequential.minimum_wind:.2f` m/s | {docvalue}`albatross/design_strategies.json:weave_sequential.minimum_wind:.2f` m/s |
+| co-designed with the cycle | {docvalue}`albatross/design_strategies.json:weave_codesign.aspect_ratio:.1f` | {docvalue}`albatross/design_strategies.json:weave_codesign.glide_ratio:.1f` | {docvalue}`albatross/design_strategies.json:loop_codesign.minimum_wind:.2f` m/s | **{docvalue}`albatross/design_strategies.json:weave_codesign.minimum_wind:.2f` m/s** |
+
+Sizing for glide ratio alone gets most of the way, because the weakest wind
+is a cruise-like objective, but it stops short: the best glider is not the
+best dynamic soarer, since the cycle also has to turn hard at the bottom.
+Co-design finds the wing that balances the two, and the S remains the
+cheaper shape whatever the wing. The co-designed O, coloured by the net
+rate at which it gains energy:
+
+```{eval-rst}
+.. plot:: _ext/gallery/albatross_trajectory.py
+   :include-source: false
+```
+
+### Differentiation
+
+The energy cycle by single shooting, its Jacobian four ways: by finite
+differences; by forward mode; and by reverse mode, once through the Direct
+adjoint and once through the checkpointing one, the library's default. The
+lift limit, the load limit and the height floor are checked at every save
+point, so the outputs grow with the save grid and the inputs with the
+control intervals; each is swept with the other held, compiled (solid) and
+not (dashed).
+
+Each method is measured at its best. Finite differences are forward
+differences at the step, from 10⁻⁴ to 10⁻⁹, that comes closest to the
+exact Jacobian, timed both batched into one vectorized call and one
+evaluation at a time, the faster counting. Compilation is paid once per
+program, and is charged separately, below:
+
+```{eval-rst}
+.. plot:: _ext/gallery/albatross_mode_sweep.py
+   :include-source: false
+```
+
+Against {docvalue}`albatross/differentiation.json:inputs.0.n_outputs:d` outputs, forward mode and
+batched finite differences run neck and neck at every size, as on the sail:
+{docvalue}`albatross/differentiation.json:inputs.26.seconds:.1f` s and
+{docvalue}`albatross/differentiation.json:inputs.25.seconds:.1f` s at
+{docvalue}`albatross/differentiation.json:inputs.26.n_inputs:d` inputs. Checkpointed reverse mode
+overtakes both from {docvalue}`albatross/differentiation.json:inputs.24.n_inputs:d` inputs, to
+{docvalue}`albatross/differentiation.json:inputs.28.seconds:.1f` s at the largest, the crossover the
+theory predicts. It is not a crossover to take, though: on these save grids
+the checkpointed reverse pass is wrong by
+{docvalue}`albatross/differentiation.json:inputs.3.error:.0%` to {docvalue}`albatross/differentiation.json:outputs.10.error:.0%`,
+where the exact modes agree to rounding and finite differences to six
+digits. Exact reverse mode, through the Direct adjoint, only draws level
+with forward mode on the largest grid, and its memory grows to
+{docvalue}`albatross/differentiation.json:outputs.20.memory:.0f*1e-6` MB as the outputs do. As the
+outputs grow at fixed inputs, forward mode and finite differences stay flat
+while both reverse modes grow with every row. The batched methods grow
+faster than the inputs, since every evaluation itself slows as the control
+grid refines. Compiling:
+
+```{eval-rst}
+.. plot:: _ext/gallery/albatross_compile_times.py
+   :include-source: false
+```
+
+At twenty intervals, each method on the four costs, the best at the rim:
+
+```{eval-rst}
+.. plot:: _ext/gallery/albatross_mode_radar.py
+   :include-source: false
+```
+
+| method | compilation | one Jacobian | error | memory |
+| --- | --- | --- | --- | --- |
+| finite differences | {docvalue}`albatross/differentiation.json:inputs.14.compile_jacobian:.1f` s | {docvalue}`albatross/differentiation.json:inputs.14.seconds:.2f` s | {docvalue}`albatross/differentiation.json:inputs.14.error:.0e` | {docvalue}`albatross/differentiation.json:inputs.14.memory:.0f*0.001` kB |
+| forward | {docvalue}`albatross/differentiation.json:inputs.15.compile_jacobian:.1f` s | {docvalue}`albatross/differentiation.json:inputs.15.seconds:.2f` s | {docvalue}`albatross/differentiation.json:inputs.15.error:.0e` | {docvalue}`albatross/differentiation.json:inputs.15.memory:.0f*0.001` kB |
+| reverse | {docvalue}`albatross/differentiation.json:inputs.16.compile_jacobian:.1f` s | {docvalue}`albatross/differentiation.json:inputs.16.seconds:.2f` s | {docvalue}`albatross/differentiation.json:inputs.16.error:.0e` | {docvalue}`albatross/differentiation.json:inputs.16.memory:.0f*0.001` kB |
+| reverse, checkpointed | {docvalue}`albatross/differentiation.json:inputs.17.compile_jacobian:.1f` s | {docvalue}`albatross/differentiation.json:inputs.17.seconds:.2f` s | {docvalue}`albatross/differentiation.json:inputs.17.error:.0e` | {docvalue}`albatross/differentiation.json:inputs.17.memory:.0f*0.001` kB |
+
+**A mode per stage.** With the split assembly, the cycle is a chain of
+three stages, each with its own shape: the statics turn the wing into
+aerodynamic constants, a {docvalue}`albatross/chain_modes.json:chains.0.statics_shape.0:d` by
+{docvalue}`albatross/chain_modes.json:chains.0.statics_shape.1:d` Jacobian; the dynamics fly the cycle,
+{docvalue}`albatross/chain_modes.json:chains.0.dynamics_shape.0:d` trajectory values from
+{docvalue}`albatross/chain_modes.json:chains.0.dynamics_shape.1:d` controls and constants; and the outputs
+read {docvalue}`albatross/chain_modes.json:chains.0.outputs_shape.1:d` of those into
+{docvalue}`albatross/chain_modes.json:chains.0.outputs_shape.0:d` constraints. Each stage differentiated in
+either mode, all eight combinations, the chain Jacobian their product,
+labelled statics · dynamics · outputs:
+
+```{eval-rst}
+.. plot:: _ext/gallery/albatross_chain_modes.py
+   :include-source: false
+```
+
+Every combination gives the same Jacobian, to
+{docvalue}`albatross/chain_modes.json:chains.2.error:.0e`. The one choice that matters is the dynamics':
+forward, {docvalue}`albatross/chain_modes.json:chains.0.dynamics_seconds:.1f` s and
+{docvalue}`albatross/chain_modes.json:chains.0.dynamics_memory:.0f*0.001` kB, against
+{docvalue}`albatross/chain_modes.json:chains.2.dynamics_seconds:.1f` s and
+{docvalue}`albatross/chain_modes.json:chains.2.dynamics_memory:.1f*1e-6` MB in reverse, since it has seven
+times more outputs than inputs. The statics and the outputs cost a
+millisecond or less either way, so their mode is free, whatever the
+reverse-for-the-design intuition suggests. The rule of inputs against
+outputs applies stage by stage, not to the chain as a whole. Finite
+differences of the whole chain, batched into one call, take
+{docvalue}`albatross/chain_modes.json:fd.seconds:.1f` s, as long as the forward chains,
+for six digits rather than fifteen.
+
+## References
+
+```{footbibliography}
+```

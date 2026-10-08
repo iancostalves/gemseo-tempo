@@ -165,12 +165,16 @@ def test_key_pages_are_not_empty_stubs(page):
     assert len(text.splitlines()) > 20, f"{page} looks like a stub"
 
 
+PROBLEMS = ("brachistochrone", "sail", "albatross")
+"""The problems, in the order the documentation reads them."""
+
+PARTS = ("index", "physics", "optimization", "uncertainty")
+"""The pages of a problem, in the order its toctree reads them."""
+
 PROBLEM_PAGES = [
-    f"problems/{problem}/{part}.md"
-    for problem in ("brachistochrone", "sail", "albatross")
-    for part in ("physics", "optimization", "uncertainty")
+    f"problems/{problem}/{part}.md" for problem in PROBLEMS for part in PARTS
 ]
-"""Every problem sub-page, in the order the documentation reads them."""
+"""Every problem page, in the order the documentation reads them."""
 
 
 @pytest.mark.parametrize("page", PROBLEM_PAGES)
@@ -211,6 +215,59 @@ def test_problem_pages_reference_benchmark_pngs_that_exist(page):
         )
 
 
+SKELETON = (
+    "Problem",
+    "Deterministic optimal control",
+    "Uncertainty propagation",
+    "Optimization under uncertainty",
+)
+"""The sections of a problem, in order: the problem; what the deterministic
+optimum is and how each method reaches it; what the uncertainty does to
+that optimum, by each way of propagating it; the design that accounts for
+the uncertainty. They are spread over the problem's pages, with the
+physics between the problem and the optimum."""
+
+
+@pytest.mark.parametrize("problem", PROBLEMS)
+def test_problem_pages_follow_the_paper_skeleton(problem):
+    """A problem reads as a paper, and can be cited as one.
+
+    Read in the order of its toctree, its pages carry the skeleton's
+    sections in order; every displayed equation carries a label, so that
+    the text can refer to it by number, from this page or another; and the
+    problem cites its sources, each page closing on the references it cites.
+    """
+    folder = DOCS / "problems" / problem
+    index = (folder / "index.md").read_text(encoding="utf-8")
+    toctree = re.search(r"```\{toctree\}\n(?::.*\n)*\n((?:\S+\n)+)```", index)
+    assert toctree, f"{problem}/index.md has no toctree"
+    assert tuple(toctree.group(1).split()) == PARTS[1:], (
+        f"{problem} reads its pages as {toctree.group(1).split()}"
+    )
+
+    headings = []
+    cited = False
+    for part in PARTS:
+        page = f"{problem}/{part}.md"
+        text = (folder / f"{part}.md").read_text(encoding="utf-8")
+        headings += re.findall(r"^## (.+)$", text, flags=re.MULTILINE)
+        unlabelled = re.findall(r"```\{math\}\n(?!:label:)", text)
+        assert not unlabelled, f"{page} has {len(unlabelled)} unlabelled equations"
+        assert "{cite}" not in text, f"{page} cites outside its own references"
+        if "{footcite" in text:
+            cited = True
+            assert text.rstrip().endswith(
+                "## References\n\n```{footbibliography}\n```"
+            ), f"{page} cites, but does not close on its references"
+        else:
+            assert "## References" not in text, (
+                f"{page} lists references it never cites"
+            )
+    sections = tuple(heading for heading in headings if heading in SKELETON)
+    assert sections == SKELETON, f"{problem} has sections {sections}"
+    assert cited, f"{problem} cites nothing"
+
+
 def test_every_variable_the_pages_mention_is_declared():
     """A mention of a name no registry has fails the documentation build.
 
@@ -220,6 +277,8 @@ def test_every_variable_the_pages_mention_is_declared():
     import re
     import sys
 
+    # The extension is built on docutils, which only the doc extras install.
+    pytest.importorskip("docutils")
     sys.path.insert(0, str(DOCS / "_ext"))
     from tempo_myst import registry_label
     from tempo_myst import walk_registries

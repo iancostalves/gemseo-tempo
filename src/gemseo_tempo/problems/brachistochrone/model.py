@@ -167,6 +167,17 @@ REGISTRY = VariableRegistry(
             tags=frozenset({"state"}),
         ),
         Variable(
+            name="elapsed",
+            full_name="Elapsed time",
+            description=(
+                "Time since release, a state when the wire is integrated"
+                " along its length rather than in time."
+            ),
+            unit="s",
+            lower_bound=0.0,
+            tags=frozenset({"state"}),
+        ),
+        Variable(
             name="gamma",
             full_name="Path angle",
             description="Angle of the path below the horizontal.",

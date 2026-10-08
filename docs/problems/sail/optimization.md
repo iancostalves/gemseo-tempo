@@ -3,214 +3,179 @@
 ```{variable-context} gemseo_tempo.problems.sail.model:REGISTRY
 ```
 
-## Why gybing pays
+## Deterministic optimal control
 
-Sailing straight at a mark that lies dead downwind is slow, because a boat
-running dead downwind is slow. Heading up onto a broad reach costs distance
-but buys enough speed to more than pay for it. The quantity that decides this
-is the **speed made good**, the part of the boat speed that actually shortens
-the distance to the mark:
+:::{admonition} Takeaway: the deterministic problem
+:class: tip
 
-```text
-VMG = V(TWA) * |cos(TWA)|
-```
+- **Transcription:** single shooting. Collocation settles in a narrower,
+  slower gybe, and indirect shooting cannot represent the gybe at all.
+- **Discretization:** twenty-five to fifty control intervals; the upwind leg
+  from more than one start, since the polar's guess leads to a slow local
+  optimum.
+- **Differentiation:** forward mode through the Direct adjoint, compiled,
+  or finite differences batched into one call: the two run neck and neck
+  at every size, forward with exact derivatives, differences with six or
+  seven digits. Reverse mode is the slowest and the heaviest, and the
+  checkpointing adjoint is not exact here.
+:::
 
-For this polar, in 10 m/s of wind:
+### Variants
 
-| sailing | TWA | boat speed | speed made good |
-| --- | --- | --- | --- |
-| dead downwind | 180 deg | 4.50 m/s | 4.50 m/s |
-| best gybing angle | 153.9 deg | 5.62 m/s | 5.05 m/s |
-
-So gybing is worth **12.2%** in principle, and over the 800 m leg that is
-158.4 s against 177.8 s sailed straight. `best_vmg_angle` computes the angle,
-and it is what the default starting point is built from.
-
-## The gybe nobody asked for
+One method throughout: single shooting on 25 intervals, solved by SLSQP
+{footcite:p}`kraft1988software` from headings read off the polar's best
+speed-made-good angle.
 
 ```{eval-rst}
-.. plot:: _ext/gallery/sail_main_result.py
+.. plot:: _ext/gallery/sail_legs.py
    :include-source: false
 ```
 
-Both direct transcriptions find the gybe, from a starting guess that only
-knows the best VMG angle and not the trajectory:
+| leg | optimized | sailed straight | polar bound |
+| --- | --- | --- | --- |
+| downwind | {docvalue}`sail/downwind.json:optimized:.1f` s | {docvalue}`sail/downwind.json:straight:.1f` s | {docvalue}`sail/vmg.json:downwind.ideal_time:.1f` s |
+| upwind | {docvalue}`sail/upwind.json:optimized:.1f` s | impossible | {docvalue}`sail/vmg.json:upwind.ideal_time:.1f` s |
 
-| transcription | nodes | time | above the ideal 158.4 s | widest point |
-| --- | --- | --- | --- | --- |
-| collocation | 25 | 161.71 s | 2.09% | 102.1 m |
-| collocation | 40 | 162.07 s | 2.32% | 86.6 m |
-| single shooting | 25 | 158.81 s | 0.26% | 189.4 m |
-| single shooting | 40 | 158.68 s | 0.18% | 192.1 m |
+The bound is the speed made good, the part of the boat speed that shortens
+the distance to the mark,
 
-Against the 177.78 s straight run, shooting is a **10.7% gain** landing within
-a quarter of a percent of the theoretical VMG optimum. The heading history
-comes back symmetric about the bearing to the mark, near `+26` and `-26`
-degrees, which is the best VMG angle of 153.9 degrees expressed as a heading;
-sailing half the leg on each of those tacks puts the widest point at about
-`400 * tan(26.1 deg)`, or 196 m, which is what shooting finds.
+```{math}
+:label: eq-sail-vmg
 
-Collocation does **not** find it, and got worse when the polar was smoothed:
-it stops around 102 m across and 2% above the ideal, and adding nodes does not
-help. That is a local optimum rather than a discretization error, and the
-smoothing is what made it reachable. The old polar had a corner at dead
-downwind with slope `0.0027` per degree on either side, which pushed a
-trajectory off the wind axis; without it the region near dead downwind is flat
-to first order, the gybe angle is less sharply determined, and collocation
-settles for a narrower one. The corner was making the problem easier by being
-wrong. Shooting, which integrates the dynamics rather than treating the states
-as design variables, is unaffected.
+\mathrm{VMG} = V(\mathrm{TWA}, \mathrm{TWS})\,\lvert\cos\mathrm{TWA}\rvert ,
+```
 
-## The path constraint
+maximized over the polar and held for the whole leg: no track can beat it.
+Downwind, the optimizer gybes once, holding the best angle,
+{docvalue}`sail/vmg.json:downwind.angle:.1f`°, to a tenth of a degree on both
+gybes, and arrives within a fraction of a second of the bound; the gap is the
+distance the turn costs. Upwind the mark cannot be sailed at: the optimizer
+tacks once, {docvalue}`sail/upwind.json:across:.0f` m out, at the edge of
+the race area, and arrives within 4% of the bound; the gap is the tack. The
+start matters here: from the polar's guess, which sweeps the heading slowly
+through the eye of the wind, the solver settles on a slow local optimum, so
+the leg is also started from one tack at half-way and the faster answer
+kept.
+
+The difficulty is the physics rather than the numerics. Beating upwind
+means alternating between port and starboard tack at the best upwind angle,
+and a tack **crosses the no-go zone**, where the boat is briefly not
+propelled at all and carries through on its own momentum
+{footcite:p}`ciccarella_optimal_2024`. A single smooth heading over the
+whole leg has to make that crossing slowly, so it pays the no-go zone's
+price at every tack instead of passing through it, and the count of tacks
+becomes part of the answer. That is what makes the upwind leg a different
+shape from the downwind one rather than a harder instance of it. The
+stochastic formulation in {footcite:t}`ciccarella_optimal_2024` makes it
+explicit by charging a fixed cost per tack and optimizing over the
+switching times, which is the structure this library would need to add to
+solve the leg from any start.
+
+Narrowing the race area turns the corridor into a constraint that binds:
 
 ```{eval-rst}
 .. plot:: _ext/gallery/sail_channel_trade.py
    :include-source: false
 ```
 
-The channel constraint limits how far the boat may stray from the direct line
-to the mark. It is the constraint worth having, because straying wide is
-precisely what gybing buys speed with, so it trades against the objective
-rather than fencing off a region the boat had no reason to enter:
-
-| half-width | time | furthest across |
+| half-width | downwind time | furthest across |
 | --- | --- | --- |
-| unconstrained | 158.81 s | 189.4 m |
-| 250 m | 158.81 s | 189.4 m |
-| 150 m | 160.24 s | 150.0 m |
-| 80 m | 161.86 s | 80.0 m |
+| 250 m | {docvalue}`sail/channel.json:widths.0.time:.2f` s | {docvalue}`sail/channel.json:widths.0.across:.1f` m |
+| 150 m | {docvalue}`sail/channel.json:widths.1.time:.2f` s | {docvalue}`sail/channel.json:widths.1.across:.1f` m |
+| 80 m | {docvalue}`sail/channel.json:widths.2.time:.2f` s | {docvalue}`sail/channel.json:widths.2.across:.1f` m |
 
-A limit the free optimum already respects leaves it untouched; tighter limits
-bind exactly, and cost time monotonically.
+A narrower channel costs time, monotonically. The constrained leg has
+several local optima, so each width is solved from two starts, the
+unconstrained optimum and the next looser design, and the better is kept.
 
-Those numbers are the **best of several starting points**, and they have to be.
-Every entry here is a different local optimum depending on where the solve
-begins, and no single strategy wins at every width. Warm-starting from the
-unconstrained optimum is what gets 150 m to bind at 150.0 m rather than
-stalling at 98.2 m and a second slower; chaining that same design onward to
-80 m stalls instead at 42.0 m and 162.79 s, where a cold start from the
-polar-derived guess binds properly at 161.86 s. The guess sails a narrow gybe,
-so it is a good start for a narrow channel and a poor one for a wide one.
+### Transcriptions
 
-This is not conditioning. Scaling the constraint by 1, by its own half-width
-and by the leg length gives byte-identical answers, and 800 and 2000 iterations
-give identical designs. It is the shape of the problem: the channel-constrained
-downwind leg has several local optima and the solver finds the one nearest
-where it started.
+The downwind leg, by each transcription, with SLSQP:
 
-The no-go cone gets **no** path constraint by default. The polar already gives
-a boat pointed inside the cone essentially no speed, which is the physical
-reason it cannot go there, and a hard constraint on top of that forbids the
-brief crossing that a tack is made of. It is available as `enforce_no_go` for
-the cases where the explicit constraint is wanted.
-
-## What compiling costs
-
-One discipline evaluation, compiled against eager, at 25 nodes and 75
-variables: 1.39 s to compile, 0.7 ms compiled, 460.8 ms eager, a 628x
-speedup with the crossover at 3 evaluations. Compiling pays sooner here
-than on the brachistochrone, because a single eager evaluation of a
-wind-field lookup is far more expensive to begin with; see
-{doc}`../../guides/benchmarking` for how the measurement avoids timing a
-discipline's own input cache instead.
-
-## Transcription benchmarks
-
-```{image} ../../_data/sail/transcription_study.png
-:alt: Transcription benchmark on the sail
+```{eval-rst}
+.. plot:: _ext/gallery/sail_transcriptions.py
+   :include-source: false
 ```
 
-Reused from `benchmarks/baselines/sail.json` rather than re-run here, since
-it was blessed with this same polar and nothing since has changed the
-physics it measures. `python benchmarks/bless.py` regenerates it when
-something does.
+| transcription | grid | time | error | wall time |
+| --- | --- | --- | --- | --- |
+| shooting | 25 | {docvalue}`sail/transcriptions.json:rows.1.objective:.2f` s | {docvalue}`sail/transcriptions.json:rows.1.error:.1e` | {docvalue}`sail/transcriptions.json:rows.1.seconds:.0f` s |
+| collocation | 25 | {docvalue}`sail/transcriptions.json:rows.5.objective:.2f` s | {docvalue}`sail/transcriptions.json:rows.5.error:.1e` | {docvalue}`sail/transcriptions.json:rows.5.seconds:.0f` s |
+| indirect | none | not converged | | |
 
-## The upwind leg
+Collocation settles in a narrower gybe than shooting and a couple of
+percent slower, and refining its grid does not help: that is a local
+optimum, not a discretization error. Shooting integrates the dynamics
+instead of treating the positions as unknowns, and reaches the wider one.
 
-The `upwind` leg puts the mark dead into the wind, where the boat cannot sail
-at it at all, so `straight_run_time` is infinite and beating is the only way
-there. It is the harder problem, and it is included as an honest hard case
-rather than a solved one: with a single smooth heading over the whole leg,
-neither transcription converges reliably.
+Indirect shooting cannot solve this leg at all, and the reason is the
+physics. In a uniform wind the costates are constant, and the heading that
+minimizes the Hamiltonian is the one that maximizes the speed made good
+along them: there are two, the best angle on each gybe, with exactly the
+same value. The optimal track is a mix of the two, which the direct methods
+approximate by gybing, but a control law that returns one heading sails a
+single gybe all the way and misses the mark by hundreds of metres. Started
+from the finest collocation solution, the residual of the necessary
+conditions stays at {docvalue}`sail/transcriptions.json:rows.8.residual:.0f`.
 
-| transcription | nodes | time | above the ideal 248.1 s |
-| --- | --- | --- | --- |
-| collocation | 25 | 300.13 s | 21.0% |
-| collocation | 40 | 258.05 s | 4.0% |
-| single shooting | 25 | 256.37 s | 3.3% |
-| single shooting | 40 | 343.67 s | 38.5% |
+### Differentiation
 
-The difficulty is real rather than numerical, and it is a known feature of
-the problem rather than a peculiarity of this implementation. Beating upwind
-means alternating between port and starboard tack at the best upwind angle,
-and a tack **crosses the no-go zone**, where the boat is briefly not
-propelled at all and carries through on its own momentum
-{cite}`ciccarella2024sailboat`. A single smooth heading over the whole leg
-has to make that crossing slowly, so it pays the no-go zone's price at every
-tack instead of passing through it.
+The downwind leg by single shooting, its Jacobian three ways: by finite
+differences, by forward mode and by reverse mode, both modes through the
+Direct adjoint the sail always needs. The channel is checked at every save
+point, so the outputs grow with the save grid while the inputs grow with
+the control intervals; each is swept with the other held, compiled (solid)
+and not (dashed).
 
-A piecewise-linear heading helps shooting (273 s at 40 nodes) but not
-collocation. Representing a tack properly needs either a phase structure
-that lets the heading jump, or a control fine enough to turn sharply without
-oscillating elsewhere — and either way the count of tacks becomes part of
-the answer, which is what makes the upwind problem a different shape from
-the downwind one rather than a harder instance of it. The stochastic
-formulation in {cite}`ciccarella2024sailboat` makes that explicit by
-charging a fixed cost per tack and optimizing over the switching times,
-which is the structure this library would need to add.
+Each method is measured at its best. Finite differences are forward
+differences at the step, from 10⁻⁴ to 10⁻⁹, that comes closest to the
+exact Jacobian, timed both batched into one vectorized call and one
+evaluation at a time, the faster counting. Compilation is paid once per
+program, and is charged separately, below:
 
-## Discussion
+```{eval-rst}
+.. plot:: _ext/gallery/sail_mode_sweep.py
+   :include-source: false
+```
 
-Findings about this library, surfaced by this problem, that do not belong
-under Physics, Optimization or Optimization under uncertainty.
+Forward mode and batched finite differences run neck and neck at every
+size, each a few percent ahead at some sizes and behind at others: at
+{docvalue}`sail/differentiation.json:inputs.27.n_inputs:d` inputs,
+{docvalue}`sail/differentiation.json:inputs.28.seconds:.1f` s by forward mode against
+{docvalue}`sail/differentiation.json:inputs.27.seconds:.1f` s by differences. Both push every input
+direction through the solve in one batch, and neither stores it. Reverse
+mode through the Direct adjoint does, to sweep back through it: it is the
+slowest at every size, {docvalue}`sail/differentiation.json:inputs.29.seconds:.1f` s at the largest,
+and its memory grows with the solve, to
+{docvalue}`sail/differentiation.json:inputs.29.memory:.0f*1e-6` MB against
+{docvalue}`sail/differentiation.json:inputs.28.memory:.1f*1e-6` MB. As the outputs grow at fixed
+inputs, forward mode and finite differences stay flat, their cost set by
+the inputs alone, while reverse mode grows with every output, to
+{docvalue}`sail/differentiation.json:outputs.20.seconds:.1f` s at
+{docvalue}`sail/differentiation.json:outputs.20.n_outputs:d` outputs. Compiling the reverse program
+takes longer than the forward one, up to five times as long, and the
+batched differences compile fastest of all:
 
-### The adjoint this problem needs
+```{eval-rst}
+.. plot:: _ext/gallery/sail_compile_times.py
+   :include-source: false
+```
 
-This is the only problem in the library that does not use the library's
-default adjoint, and the only one whose right-hand side reads an interpolated
-[`SpatialField`][gemseo_tempo.dynamics.fields.SpatialField]. Interpolation
-gathers from the grid; its transpose scatters back into it; and diffrax's
-`RecursiveCheckpoint` adjoint gets that wrong once the reverse pass is itself
-batched. Measured at the downwind optimum, against the sensitivity of the
-along-track arrival point to the wind strength that central differences give
-as `1241.15` at two step sizes:
+At twenty-five intervals, each method on the four costs, the best at the
+rim:
 
-| how the derivative is taken | RecursiveCheckpoint | Direct |
-| --- | --- | --- |
-| one cotangent, `jax.grad` | exact | exact |
-| `jax.jacrev`, several outputs at once | +0.61% | exact |
-| a `vmap` over that | -8.95% | exact |
+```{eval-rst}
+.. plot:: _ext/gallery/sail_mode_radar.py
+   :include-source: false
+```
 
-Nothing raises and no value is wrong; only derivatives are. The middle row is
-the one that matters in practice, because a GEMSEO discipline Jacobian *is* a
-`jacrev` over every output at once. So `create_scenario` builds the integrator
-with the `Direct` adjoint, and **refuses** one handed to it that carries the
-default, since passing an integrator is the ordinary way to fix a step size
-and doing so used to lose the correction without a word. Build one with
-`sail_integrator()`. The Direct adjoint unrolls the solve rather than
-checkpointing it and costs about a third more (23.0 s against 17.0 s on the
-downwind leg).
+| method | compilation | one Jacobian | error | memory |
+| --- | --- | --- | --- | --- |
+| finite differences | {docvalue}`sail/differentiation.json:inputs.12.compile_jacobian:.1f` s | {docvalue}`sail/differentiation.json:inputs.12.seconds:.3f` s | {docvalue}`sail/differentiation.json:inputs.12.error:.0e` | {docvalue}`sail/differentiation.json:inputs.12.memory:.0f*0.001` kB |
+| forward | {docvalue}`sail/differentiation.json:inputs.13.compile_jacobian:.1f` s | {docvalue}`sail/differentiation.json:inputs.13.seconds:.3f` s | {docvalue}`sail/differentiation.json:inputs.13.error:.0e` | {docvalue}`sail/differentiation.json:inputs.13.memory:.0f*0.001` kB |
+| reverse | {docvalue}`sail/differentiation.json:inputs.14.compile_jacobian:.1f` s | {docvalue}`sail/differentiation.json:inputs.14.seconds:.3f` s | {docvalue}`sail/differentiation.json:inputs.14.error:.0e` | {docvalue}`sail/differentiation.json:inputs.14.memory:.0f*0.001` kB |
 
-Worth recording how this was found, because the first diagnosis was wrong. The
-two adjoints also disagreed at the starting guess, and that disagreement was
-not the adjoint: it was the polar's corner at dead downwind, which the guess
-sails straight through, with the two adjoints landing on opposite sides of it.
-Only once the polar was smooth did the guess agree under both and the real
-effect show up alone at the optimum. From a single number, a one-sided
-derivative at a kink and a wrong derivative look exactly the same.
+## References
 
-### Two things that had to be got right
-
-**The heading bounds are a single turn** centred on the bearing to the mark.
-The heading enters the dynamics only through its sine and cosine, so any wider
-bound re-admits every trajectory again, shifted by a multiple of `2*pi`. Given
-two turns the optimizer drifts through a wrap instead of gybing, and the
-downwind result degrades from a 10% gain to 3%.
-
-**The starting point is read off the polar** rather than picked by hand, by
-`default_guess`: the best VMG angle gives the two headings, one per tack, and
-the guess sweeps from one to the other, while the made-good speed gives the
-final time as `distance / VMG`. A poor guess is not harmless here. Started
-38% slow in the final time, single shooting stalls on its first line search
-and returns the guess unchanged; started from the polar it converges to within
-0.4% of collocation.
+```{footbibliography}
+```

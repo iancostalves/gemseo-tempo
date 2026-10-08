@@ -1,103 +1,107 @@
-# Optimization under uncertainty
+# Uncertainty
 
 ```{variable-context} gemseo_tempo.problems.albatross.model:REGISTRY
 ```
 
-(uq-strategies-comparison)=
-## UQ strategies comparison
+## Uncertainty propagation
 
-The two uncertain quantities in this problem are the ones the wind profile
-above turns on: the reference wind `w_ref` and the sea-surface roughness
-`h0`. Propagated through the fixed-wind cycle's final specific energy
-(`energy`, the same quantity the mission `energy` above maximizes), with
-single shooting rather than collocation, since the states must be free to
-respond to a changed wind — see
-{doc}`../../concepts/transcriptions`'s "Which one to use":
+:::{admonition} Takeaway: uncertainty propagation
+:class: tip
 
-Morris screening, at 60 evaluations, ranks the two variables in the same
-order Sobol indices confirm at 2048 evaluations, and the vmapped batch
-evaluator (8.2x on this study's 256-draw speedup measurement) is what makes
-running both affordable in the same study rather than a choice between
-them; see {doc}`../../guides/uncertainty` for what that speedup is worth in
-general and the corrected, range-normalized elementary effect this ranking
-depends on.
+- **Transcription:** single shooting, so that the frozen cycle responds to
+  the wind, started from a forty-segment collocation optimum. From the
+  default guess, or from twenty segments, shooting does not converge.
+- **Sampling:** vectorized with `vmap`.
+- **Estimator:** first-order Taylor, two model calls.
+- **Differentiation:** finite differences, batched into one call: with two
+  uncertain inputs they serve as well as exact derivatives, and are the
+  quicker.
+:::
 
-```{list-table}
-:header-rows: 1
-:widths: 25 25 25 25
+The wind at 10 m is forecast at 22 m/s and known to 10%, and the roughness
+of the sea, which sets how fast the wind grows with height, is log-normal
+about 3 cm. The cycle that banks the most energy at the forecast, the energy
+mission on {doc}`optimization`, is flown here by single shooting on forty
+intervals, started from the collocation answer, so that a frozen cycle
+responds to the wind. It ends
+with an energy height of {docvalue}`albatross/propagation.json:objective:.1f*-1` m at the
+forecast and {docvalue}`albatross/propagation.json:reference.mean:.1f` ±
+{docvalue}`albatross/propagation.json:reference.standard_deviation:.1f` m over the uncertainty.
+Each way of estimating that, against 20 000 draws, where AD marks exact
+derivatives by reverse-mode automatic differentiation and FD central
+differences, every perturbed point in the same vectorized call, at the
+step closest to the exact derivative at the mean:
 
-* - variable
-  - Morris mean effect
-  - Sobol first order
-  - Sobol total
-* - `w_ref`
-  - 249.0
-  - **0.752**
-  - **0.840**
-* - `roughness`
-  - 133.3
-  - 0.127
-  - 0.489
-```
-
-`w_ref` dominates both measures, at a fifth of the evaluations. `roughness`
-is worth keeping rather than dropping, though: its total index (0.489) is
-well above its first order (0.127), so a large share of its influence is in
-interaction with `w_ref` rather than acting alone — a screening that only
-looked at first-order Sobol, or that dropped `roughness` for having the
-smaller Morris effect, would have missed that its effect is conditional.
-
-Six estimators score against the same 4096-sample reference. Unlike the
-sail's arrival error, this response does not reward the analytic
-estimators:
-
-| estimator | model calls | seconds | mean error | std error |
+| method | error, mean | error, deviation | model calls | time |
 | --- | --- | --- | --- | --- |
-| sampling, vmapped | 128 | 0.37 | -6.5% | +6.9% |
-| sampling, looped | 128 | 2.82 | -6.5% | +6.9% |
-| Taylor, first order | 2 | 0.29 | -51.4% | -90.2% |
-| Taylor, second order | 6 | 0.65 | -45.0% | -85.8% |
-| chaos, 32 points | 32 | 0.12 | +25.1% | +517.4% |
-| chaos + gradients, 32 | 64 | 0.90 | -20.0% | +77.2% |
+| sampling, 256 draws | {docvalue}`albatross/propagation.json:estimates.sampling_vmapped.mean_error:+.0e` σ | {docvalue}`albatross/propagation.json:estimates.sampling_vmapped.deviation_error:+.0e` | {docvalue}`albatross/propagation.json:estimates.sampling_vmapped.model_calls:d` | {docvalue}`albatross/propagation.json:estimates.sampling_vmapped.seconds:.3f` s, looped {docvalue}`albatross/propagation.json:estimates.sampling_looped.seconds:.2f` s |
+| Taylor, 1st order, AD | {docvalue}`albatross/propagation.json:estimates.taylor1_ad.mean_error:+.0e` σ | {docvalue}`albatross/propagation.json:estimates.taylor1_ad.deviation_error:+.0e` | {docvalue}`albatross/propagation.json:estimates.taylor1_ad.model_calls:d` | {docvalue}`albatross/propagation.json:estimates.taylor1_ad.seconds:.3f` s |
+| Taylor, 1st order, FD | {docvalue}`albatross/propagation.json:estimates.taylor1_fd.mean_error:+.0e` σ | {docvalue}`albatross/propagation.json:estimates.taylor1_fd.deviation_error:+.0e` | {docvalue}`albatross/propagation.json:estimates.taylor1_fd.model_calls:d` | {docvalue}`albatross/propagation.json:estimates.taylor1_fd.seconds:.3f` s |
+| Taylor, 2nd order, AD | {docvalue}`albatross/propagation.json:estimates.taylor2_ad.mean_error:+.0e` σ | {docvalue}`albatross/propagation.json:estimates.taylor2_ad.deviation_error:+.0e` | {docvalue}`albatross/propagation.json:estimates.taylor2_ad.model_calls:d` | {docvalue}`albatross/propagation.json:estimates.taylor2_ad.seconds:.3f` s |
+| Taylor, 2nd order, FD | {docvalue}`albatross/propagation.json:estimates.taylor2_fd.mean_error:+.0e` σ | {docvalue}`albatross/propagation.json:estimates.taylor2_fd.deviation_error:+.0e` | {docvalue}`albatross/propagation.json:estimates.taylor2_fd.model_calls:d` | {docvalue}`albatross/propagation.json:estimates.taylor2_fd.seconds:.3f` s |
+| chaos, 12 points | {docvalue}`albatross/propagation.json:estimates.chaos.mean_error:+.0e` σ | {docvalue}`albatross/propagation.json:estimates.chaos.deviation_error:+.0e` | {docvalue}`albatross/propagation.json:estimates.chaos.model_calls:d` | {docvalue}`albatross/propagation.json:estimates.chaos.seconds:.3f` s |
+| chaos + AD gradients | {docvalue}`albatross/propagation.json:estimates.chaos_ad.mean_error:+.0e` σ | {docvalue}`albatross/propagation.json:estimates.chaos_ad.deviation_error:+.0e` | {docvalue}`albatross/propagation.json:estimates.chaos_ad.model_calls:d` | {docvalue}`albatross/propagation.json:estimates.chaos_ad.seconds:.3f` s |
+| chaos + FD gradients | {docvalue}`albatross/propagation.json:estimates.chaos_fd.mean_error:+.0e` σ | {docvalue}`albatross/propagation.json:estimates.chaos_fd.deviation_error:+.0e` | {docvalue}`albatross/propagation.json:estimates.chaos_fd.model_calls:d` | {docvalue}`albatross/propagation.json:estimates.chaos_fd.seconds:.3f` s |
 
-Both Taylor rows miss the standard deviation by nearly an order of
-magnitude, and the second-order correction barely helps: the energy
-response to the wind is curved enough over this parameter range that a
-polynomial expansion around one point is the wrong tool, not merely an
-imprecise one. Unweighted chaos at 32 points is worse than either Taylor
-row on the spread, by a wide margin, which is the opposite of what
-{doc}`../sail/index`'s UQ strategies comparison finds for the same estimator — the
-gradient-enhanced version at the same 32 points is the only one of the six
-within a factor of two of the reference spread. The contrast with the
-sail is the finding: which cheap estimator is trustworthy is a property of
-the response being estimated, not of the method in the abstract, and
-plain sampling, expensive as it looks in a table, is the one that does not
-depend on that judgment call.
+The energy banked is nearly linear in the wind and the roughness over their
+ranges, so every method lands within a few hundredths of a deviation of the
+reference, and first-order Taylor, one evaluation and one gradient, is as
+good as any. Vectorizing pays most again: the 256 draws take
+{docvalue}`albatross/propagation.json:estimates.sampling_vmapped.seconds:.1f` s in one `vmap`
+dispatch against {docvalue}`albatross/propagation.json:estimates.sampling_looped.seconds:.1f` s
+in a loop. With two uncertain inputs, finite differences need four
+evaluations per gradient and are cheaper than a reverse pass through nine
+seconds of flight: exact derivatives with respect to two inputs are not what
+this problem is short of. The gradient that matters is the one with respect
+to the cycle's controls, which the next section needs.
 
-(multiobjective-optimization-under-uncertainty)=
-## Multiobjective optimization under uncertainty
+## Optimization under uncertainty
 
-{ref}`Formulation B <formulation-b-what-did-you-size-it-for>` found that no
-sequential weighting of glide against manoeuvrability reproduces the
-co-design wing, because the vehicle merit is linear and its optimum sits at
-a vertex while the mission's sits in the interior. That comparison was run
-at one wind and one roughness. The question this subsection asks is whether
-the *ranking itself* — cruise-sized, dynamics-sized, co-designed — is stable
-once the forecast the bird was designed against is wrong.
+:::{admonition} Takeaway: optimization under uncertainty
+:class: tip
 
-Both B-cruise and B-dynamics are frozen designs: fixed wings, flown by
-re-solving only the cycle for each wind draw. The co-design wing, by
-contrast, was never handed a wind to be robust to; it was optimized for the
-single worst wind it could sustain. Freezing each of the three wings and
-propagating the same `w_ref`/`roughness` uncertainty through its flown cycle
-is what makes them comparable on the same footing the UQ strategies
-comparison above was measured on.
+- **Formulation:** the mean less twice the deviation of the energy,
+  started from the deterministic cycle.
+- **Sampling:** one fixed sample of
+  {docvalue}`albatross/robust.json:design_sample:d` draws, checked on
+  {docvalue}`albatross/robust.json:check_sample:d` fresh ones.
+- **Differentiation:** automatic, with the Jacobian taken group by group:
+  the constraints on the forecast flight in forward mode, the statistic
+  through the sample in reverse mode, both through the Direct adjoint. One
+  gradient costs a seventh of what finite differences do, even batched
+  into one call.
+:::
 
-The structural finding above already answers half the question: since no
-convex combination of the two sizing objectives reaches the co-design wing,
-no re-weighting *in response to* a wind forecast can reach it either. What a
-propagated uncertainty adds is whether the cruise wing's near-miss (+2.9% on
-minimum wind, at one wind) is a robust near-miss or one that only holds at
-the nominal forecast — which is the practical version of the question a
-designer choosing between "size for cruise" and "co-design properly" is
-actually asking.
+The robust cycle maximizes the mean energy less twice its deviation over
+{docvalue}`albatross/robust.json:design_sample:d` draws of the wind and the sea, starting
+from the deterministic one. Both, flown on
+{docvalue}`albatross/robust.json:check_sample:d` fresh draws:
+
+| cycle | at the forecast | mean | deviation | 5th percentile |
+| --- | --- | --- | --- | --- |
+| deterministic | {docvalue}`albatross/robust.json:designs.deterministic.nominal:.2f` m | {docvalue}`albatross/robust.json:designs.deterministic.mean:.2f` m | {docvalue}`albatross/robust.json:designs.deterministic.std:.2f` m | {docvalue}`albatross/robust.json:designs.deterministic.p05:.2f` m |
+| robust, mean − 2σ | {docvalue}`albatross/robust.json:designs.robust.nominal:.2f` m | {docvalue}`albatross/robust.json:designs.robust.mean:.2f` m | {docvalue}`albatross/robust.json:designs.robust.std:.2f` m | {docvalue}`albatross/robust.json:designs.robust.p05:.2f` m |
+
+The robust cycle gives up most of a metre at the forecast and a quarter of
+one on average, and in exchange its spread falls by a third and its worst
+cycle in twenty banks almost two metres more.
+
+Here the gradient is the bottleneck. Every iteration differentiates the
+mean and deviation of {docvalue}`albatross/robust.json:design_sample:d` nine-second flights
+with respect to all {docvalue}`albatross/robust.json:gradient_cost.n_design:d` controls:
+one gradient takes {docvalue}`albatross/robust.json:gradient_cost.ad_seconds:.1f` s by AD,
+one reverse pass through the whole batch, against
+{docvalue}`albatross/robust.json:gradient_cost.fd_seconds:.1f` s by finite differences, even
+with every perturbed cycle flown in the same vectorized call. With AD the
+robust solve ran its {docvalue}`albatross/robust.json:designs.robust.calls:d` iterations, its
+budget, in {docvalue}`albatross/robust.json:designs.robust.seconds:.0f*0.016666666666666666` min.
+How the Jacobian is split matters as much:
+{class}`~gemseo_tempo.uncertainty.robust.GroupedJAXDiscipline`
+differentiates the cycle's three hundred constraint rows on the forecast
+flight alone, in forward mode, eighty-two tangents rather than three
+hundred cotangents, and only the statistic through the sample, in reverse
+mode. Taken together, every constraint row would be back-propagated through
+all {docvalue}`albatross/robust.json:design_sample:d` flights. One integrator serves both
+groups, and the Direct adjoint is the better one for the pair: it lets the
+constraints go forward, at a quarter of what reverse mode costs them, and
+costs the statistic half as much again as the checkpointing adjoint would.
