@@ -218,6 +218,7 @@ def create_scenario(
         The scenario, already seeded with the guess.
     """
     guess = guess or Guess()
+    friction = variant != "ideal" or "mu" in (constants or {})
     constants = {**variant_constants(variant, gravity), **(constants or {})}
     transcription = transcription or HermiteSimpson(num_segments=size)
     indirect = isinstance(transcription, IndirectShooting)
@@ -249,8 +250,9 @@ def create_scenario(
         # exactly zero to it, which reads like a physical finding and is an
         # artefact of the wiring. That is the albatross's hardcoded lift
         # limit all over again, and it was reintroduced here for one sprint
-        # before a screening caught it.
-        state_space=create_state_space(friction=variant != "ideal"),
+        # before a screening caught it. For the same reason it stays live
+        # on the ideal variant too when mu is laid over its constants.
+        state_space=create_state_space(friction=friction),
         integrator=integrator
         or DiffraxIntegrator(rtol=1e-9, atol=1e-9, n_save=size + 1),
         controls=controls,

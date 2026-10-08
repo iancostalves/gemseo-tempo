@@ -4,63 +4,63 @@
   {
    "transcription": "shooting",
    "size": 5,
-   "objective": 0.8243386573707152,
+   "objective": 0.8243386573144903,
    "met": true,
-   "seconds": 6.574378188999617,
-   "calls": 28,
-   "error": 1.4640182494466551e-08
+   "seconds": 4.8932058999780566,
+   "calls": 29,
+   "error": 1.47083885797786e-08
   },
   {
    "transcription": "shooting",
    "size": 10,
-   "objective": 0.8243386543897063,
+   "objective": 0.8243386540295263,
    "met": true,
-   "seconds": 6.33680301000004,
-   "calls": 28,
-   "error": 1.8256425423131085e-08
+   "seconds": 4.824443600024097,
+   "calls": 33,
+   "error": 1.86933574879387e-08
   },
   {
    "transcription": "shooting",
    "size": 20,
-   "objective": 0.824338655557023,
+   "objective": 0.8243386552207735,
    "met": true,
-   "seconds": 7.280593214999499,
-   "calls": 30,
-   "error": 1.6840360969246047e-08
+   "seconds": 5.029702499974519,
+   "calls": 27,
+   "error": 1.7248263067225628e-08
   },
   {
    "transcription": "shooting",
    "size": 40,
-   "objective": 0.8243388090096877,
+   "objective": 0.8243388046362988,
    "met": true,
-   "seconds": 7.995052125999791,
-   "calls": 34,
-   "error": 1.693120911420278e-07
+   "seconds": 5.869380599935539,
+   "calls": 37,
+   "error": 1.640067608992476e-07
   },
   {
    "transcription": "shooting",
    "size": 80,
-   "objective": 0.8243386312593746,
+   "objective": 0.8243388445199602,
    "met": true,
-   "seconds": 11.741158774999349,
-   "calls": 78,
-   "error": 4.631568385484033e-08
+   "seconds": 9.36743560002651,
+   "calls": 49,
+   "error": 2.1238937699156752e-07
   },
   {
    "transcription": "collocation",
    "size": 5,
-   "objective": 0.8243404990521478,
+   "objective": 0.8243404990521479,
    "met": true,
-   "seconds": 1.9540682639999432,
+   "seconds": 1.0624104000162333,
    "calls": 18,
-   "error": 2.2194918567466305e-06
+   "error": 2.219491856881311e-06
   },
   {
    "transcription": "collocation",
    "size": 10,
    "objective": 0.824338732477945,
    "met": true,
-   "seconds": 1.4019139310003084,
+   "seconds": 0.899125500000082,
    "calls": 25,
    "error": 7.647192052016751e-08
   },
@@ -69,7 +69,7 @@
    "size": 20,
    "objective": 0.8243386659914426,
    "met": true,
-   "seconds": 1.3758552350000173,
+   "seconds": 0.8453094998840243,
    "calls": 31,
    "error": 4.182432938623817e-09
   },
@@ -78,7 +78,7 @@
    "size": 40,
    "objective": 0.8243386611944772,
    "met": true,
-   "seconds": 1.9743671559999711,
+   "seconds": 1.5109495000215247,
    "calls": 35,
    "error": 1.0001601149833474e-08
   },
@@ -87,21 +87,21 @@
    "size": 80,
    "objective": 0.8243386503130993,
    "met": true,
-   "seconds": 11.072975220999979,
+   "seconds": 6.397215400007553,
    "calls": 39,
    "error": 2.320173152493225e-08
   },
   {
    "transcription": "indirect",
    "size": null,
-   "objective": 0.8243386696928636,
+   "objective": 0.8243386694710939,
    "met": true,
-   "residual": 1.1709549983834083e-08,
-   "seed_residual": 0.0002689506742510339,
+   "residual": 7.493150100401635e-09,
+   "seed_residual": 0.00026895375858915216,
    "unknowns": 4,
-   "seconds": 29.80075956699966,
+   "seconds": 16.987092999974266,
    "calls": 16,
-   "error": 3.077374194671675e-10
+   "error": 3.870998944861813e-11
   }
  ]
 }

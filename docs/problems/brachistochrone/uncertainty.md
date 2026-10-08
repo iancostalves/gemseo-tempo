@@ -127,10 +127,10 @@ insists the trajectory moves.
 - **Sampling:** one fixed sample of {docvalue}`brachistochrone/robust.json:design_sample:d` draws,
   the same at every iteration, checked afterwards on
   {docvalue}`brachistochrone/robust.json:check_sample:d` fresh ones.
-- **Differentiation:** automatic, in the loop, once the design is large:
-  an AD gradient costs about the same whatever its size. At twenty
-  variables, finite differences batched into one call compile in half the
-  time and win a single solve.
+- **Differentiation:** finite differences batched into one call, at
+  twenty variables: they compile in a quarter of the time and win a single
+  solve. Automatic, once the design is large: an AD gradient grows far more
+  slowly with its size than the batch of differences does.
 :::
 
 Three wires, each flown on
@@ -153,19 +153,22 @@ by SLSQP from the same start with each kind of gradient:
 | AD, reverse mode | {docvalue}`brachistochrone/robust.json:designs.robust.calls:d` | {docvalue}`brachistochrone/robust.json:designs.robust.compile_seconds:.1f` s | {docvalue}`brachistochrone/robust.json:designs.robust.seconds:.1f` s |
 | FD, batched | {docvalue}`brachistochrone/robust.json:designs.robust_fd.calls:d` | {docvalue}`brachistochrone/robust.json:designs.robust_fd.compile_seconds:.1f` s | {docvalue}`brachistochrone/robust.json:designs.robust_fd.seconds:.1f` s |
 
-Both reach the same wire in the same number of iterations. Each iteration
-differentiates the mean and deviation of
+Both reach the same wire in the same number of iterations, and it is the
+wire designed for the mean constants. Each iteration differentiates the
+mean and deviation of
 {docvalue}`brachistochrone/robust.json:design_sample:d` descents with respect to all
 {docvalue}`brachistochrone/robust.json:gradient_cost.1.n_design:d` design variables. By AD that is one
-reverse pass through the whole batch, through the checkpointing adjoint,
-the fastest exact route measured; by finite differences, every perturbed
-wire flown in the same vectorized call, at the step closest to the exact
-gradient. The loop runs about twice as fast with AD, but AD compiles for
-twice as long, and over one solve of twenty iterations, compilation
-included, the batched differences come out ahead. What turns it is the
-size of the design: an AD gradient costs about the same however many
-variables there are, while the batch of differences grows with every one,
-to {docvalue}`brachistochrone/robust.json:gradient_cost.3.fd_seconds:.2f` s against
+reverse pass through the whole batch, through whichever adjoint is the
+faster; by finite differences, every perturbed wire flown in the same
+vectorized call, at the step closest to the exact gradient. At this size
+the two cost about the same per gradient,
+{docvalue}`brachistochrone/robust.json:gradient_cost.1.ad_seconds:.2f` s against
+{docvalue}`brachistochrone/robust.json:gradient_cost.1.fd_seconds:.2f` s, and over one solve the batched
+differences come out well ahead: they compile in a quarter of the time and
+the loop runs faster too. What turns it is the size of the design: an AD
+gradient grows far more slowly with the number of variables than the batch
+of differences, which grows with every one, to
+{docvalue}`brachistochrone/robust.json:gradient_cost.3.fd_seconds:.2f` s against
 {docvalue}`brachistochrone/robust.json:gradient_cost.3.ad_seconds:.2f` s at
 {docvalue}`brachistochrone/robust.json:gradient_cost.3.n_design:d` variables:
 

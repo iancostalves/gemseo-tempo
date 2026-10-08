@@ -134,17 +134,30 @@ replaces the time. With ζ = √s, which keeps the release from rest regular,
 
 \frac{dx}{d\zeta} = 2\zeta\cos\gamma, \quad
 \frac{dy}{d\zeta} = 2\zeta\sin\gamma, \quad
-\frac{dv}{d\zeta} = \frac{2\zeta}{v}\Big(g\,(\sin\gamma - \mu\cos\gamma)
+\frac{dv}{d\zeta} = \frac{2\zeta}{v}\Big(g\sin\gamma - \mu\frac{N}{m}
   - \frac{k}{m}\,v^2\Big), \quad
 \frac{dt}{d\zeta} = \frac{2\zeta}{v} .
 ```
 
-Released from rest the speed grows like ζ, so 2ζ/v stays finite and tends
-to √(2/a) at the start, with *a* the initial acceleration; that limit is
-written out, so the integrator never divides zero by zero. The time taken
-is then a state, read at the end of the wire, and the end point is pure
-geometry: however the physics changes, the bead arrives where the wire
-goes. See {mod}`~gemseo_tempo.problems.brachistochrone.wire`.
+The forces are the ones above. The normal force is still
+{eq}`brachistochrone-normal`, with the wire turning the bead as fast as the
+bead runs along its curvature, γ̇ = v dγ/ds = v (dγ/dζ) / 2ζ; the turning
+term v² (dγ/dζ) / 2ζ then vanishes at the release, where the speed grows
+like ζ. So does 2ζ/v stay finite there, tending to √(2/a) with *a* the
+initial acceleration, and both limits are written out, so the integrator
+never divides zero by zero. The time taken is then a state, read at the
+end of the wire, and the end point is pure geometry: however the physics
+changes, the bead arrives where the wire goes.
+
+The wire's angle is a cubic spline through its nodes rather than a
+piecewise-linear one, because the normal force reads its rate. A
+piecewise-linear angle has a curvature that jumps from one interval to
+the next, and friction that grows with the turn rate then pays the
+optimizer to alternate steep and flat intervals: it settles on a sawtooth
+and stalls short of the end point. The spline's curvature is continuous,
+the optimum is the smooth wire, and it agrees with the time model: the
+wire designed for the friction variant reaches that variant's reference
+descent time to a part in ten thousand. See {mod}`~gemseo_tempo.problems.brachistochrone.wire`.
 
 ## References
 

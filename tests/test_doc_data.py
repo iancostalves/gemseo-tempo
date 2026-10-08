@@ -157,10 +157,10 @@ def test_the_robust_wire_is_the_same_by_either_gradient():
     assert designs["robust_fd"]["objective"] == pytest.approx(
         designs["robust"]["objective"], rel=1e-4
     )
-    # The loop runs faster with AD, which compiles for longer, and at this
-    # size the batched differences win the solve once that is counted.
+    # Both take the same path; AD compiles for longer, and at this size the
+    # batched differences win the solve once that is counted.
     ad, fd = designs["robust"], designs["robust_fd"]
-    assert ad["seconds"] < fd["seconds"]
+    assert ad["calls"] == fd["calls"]
     assert ad["compile_seconds"] > fd["compile_seconds"]
     total = lambda design: design["seconds"] + design["compile_seconds"]  # noqa: E731
     assert total(fd) < total(ad)

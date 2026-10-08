@@ -84,6 +84,16 @@ def test_constants_are_laid_over_the_variant():
     }
 
 
+def test_mu_laid_over_the_ideal_variant_keeps_friction_live():
+    """An uncertain mu laid over the ideal bead has to reach its dynamics."""
+    plain = create_scenario(transcription=SingleShooting(), variant="ideal")
+    rough = create_scenario(
+        transcription=SingleShooting(), variant="ideal", constants={"mu": 0.05}
+    )
+    assert not plain.definition["state_space"].control_rates
+    assert rough.definition["state_space"].control_rates == ("gamma",)
+
+
 def test_ideal_dynamics_are_the_frictionless_ones():
     space = create_state_space()
     rates = space.rhs(
@@ -311,6 +321,18 @@ def test_the_wire_designed_for_the_ideal_bead_is_the_cycloid():
     )
 
 
+def test_the_wire_designed_for_a_rough_bead_is_the_one_in_time():
+    """Two models of one bead, optimized apart, land on one descent time.
+
+    The friction variant's reference comes from the time model; the wire
+    reaches it along its own length, through the same normal force,
+    turning included. With the classical law in one and not the other they
+    would differ by the several percent the turning term is worth.
+    """
+    wire_time = solve(create_wire_optimization(size=20, variant="friction"), 300)
+    assert wire_time == pytest.approx(reference_time("friction"), rel=1e-4)
+
+
 def test_the_length_bounds_follow_the_wire_s_own_target():
     """Another end of the wire, another straight line to bound the length by."""
     from gemseo_tempo.problems.brachistochrone.wire import wire_bounds
@@ -331,11 +353,47 @@ def test_the_start_of_the_wire_is_regular():
 
     def rate(mu):
         theta = {"g": GRAVITY, "mu": mu, "drag_coefficient": 1.2}
-        return wire_rhs(0.0, states, {"gamma": 1.2}, theta)["elapsed"]
+        controls = {"gamma": 1.2, "gamma_rate": -0.8}
+        return wire_rhs(0.0, states, controls, theta)["elapsed"]
 
+    # At rest the wire turns nothing, so the normal force is the weight's.
     push = GRAVITY * (numpy.sin(1.2) - 0.1 * numpy.cos(1.2))
     assert float(rate(0.1)) == pytest.approx(numpy.sqrt(2.0 / push))
     assert numpy.isfinite(float(jax.grad(rate)(0.1)))
+
+
+def test_the_wire_feels_the_same_forces_as_the_bead_in_time():
+    """Along the wire or in time, one bead: the rates agree once rescaled.
+
+    The wire reads its angle's rate per unit of zeta, and turns the bead
+    as fast as the bead runs along it, so the time model at the same point
+    has to be handed dgamma/dt = v (dgamma/dzeta) / (2 zeta). The case is
+    a hard turn on a rough wire, where the turning term is most of the
+    normal force; written with the classical law, the two would disagree.
+    """
+    from gemseo_tempo.problems.brachistochrone.model import brachistochrone_rhs
+    from gemseo_tempo.problems.brachistochrone.wire import wire_rhs
+
+    zeta, speed, angle, slope = 0.7, 2.1, 0.9, -2.5
+    theta = {"g": GRAVITY, "mu": 0.3, "drag_coefficient": 1.2}
+    along = wire_rhs(
+        zeta,
+        {"x": 0.0, "y": 0.0, "v": speed, "elapsed": 0.0},
+        {"gamma": angle, "gamma_rate": slope},
+        theta,
+    )
+    in_time = brachistochrone_rhs(
+        0.0,
+        {"x": 0.0, "y": 0.0, "v": speed},
+        {"gamma": angle, "gamma_rate": speed * slope / (2.0 * zeta)},
+        theta,
+    )
+    for name in ("x", "y", "v"):
+        assert float(along[name] / along["elapsed"]) == pytest.approx(
+            float(in_time[name]), rel=1e-12
+        )
+    classical = GRAVITY * (numpy.sin(angle) - 0.3 * numpy.cos(angle))
+    assert abs(float(along["v"] / along["elapsed"]) - classical) > 0.5
 
 
 def test_the_physics_changes_the_time_along_a_wire_but_not_where_it_ends():

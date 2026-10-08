@@ -29,18 +29,39 @@ root ``zeta = sqrt(s)``, which keeps the start regular, the equations read
 
     dx/dzeta = 2 zeta cos(gamma)
     dy/dzeta = 2 zeta sin(gamma)
-    dv/dzeta = 2 zeta (g (sin(gamma) - mu cos(gamma)) - (k/m) v**2) / v
+    dv/dzeta = 2 zeta (g sin(gamma) - mu N/m - (k/m) v**2) / v
     dt/dzeta = 2 zeta / v
+
+with ``N/m`` the normal force of the time model,
+:func:`~gemseo_tempo.problems.brachistochrone.model.normal_over_mass`,
+turning included. A wire turns the bead as fast as the bead runs along its
+curvature, ``dgamma/dt = v dgamma/ds``, and the control's rate the model
+reads is ``dgamma/dzeta = 2 zeta dgamma/ds``; so the turning term is
+``v**2 (dgamma/dzeta) / (2 zeta)``, which vanishes at the release, where the
+speed grows like ``zeta``.
 
 Released from rest the speed grows like ``zeta``, so ``2 zeta / v`` stays
 finite and tends to ``sqrt(2 / a)`` at the start, with ``a`` the initial
-acceleration: that limit is written out, so the integrator never divides
-zero by zero. The time taken is then a state, read at the end of the wire,
-and the end point is pure geometry: however the physics changes, the bead
-arrives where the wire goes.
+acceleration: that limit, and the vanishing turning term, are written
+out, so the integrator never divides zero by zero. The time taken is then
+a state, read at the end of the wire, and the end point is pure geometry:
+however the physics changes, the bead arrives where the wire goes.
 
 The scenario's free final "time" is the square root of the wire length, and
-the angle is a control over the normalized ``zeta``.
+the angle is a control over the normalized ``zeta``: a cubic spline
+through its nodes, so that its rate, which the normal force reads, is
+continuous. A piecewise-linear angle would hand the friction a curvature
+that jumps from one interval to the next, and friction that grows with the
+turn rate then pays the optimizer to alternate steep and flat intervals: it
+settles on a sawtooth and stalls short of the end point, where the spline
+converges in a few dozen iterations to the smooth wire.
+
+Unlike the time model, the wire never drops friction, not even for the
+ideal bead. Only indirect shooting has reason to want it dropped, and a
+wire is shot directly; meanwhile the wire is what the uncertainty studies
+fly, starting from the ideal variant's constants with an uncertain ``mu``
+laid over them, and a model that ignored it would report a sensitivity of
+exactly zero.
 """
 
 from __future__ import annotations
@@ -48,7 +69,7 @@ from __future__ import annotations
 import jax.numpy as jnp
 import numpy
 
-from gemseo_tempo.dynamics.controls import PiecewiseLinearControl
+from gemseo_tempo.dynamics.controls import CubicControl
 from gemseo_tempo.dynamics.integrators import DiffraxIntegrator
 from gemseo_tempo.dynamics.state_space import StateSpace
 from gemseo_tempo.outputs.functionals import Mayer
@@ -56,6 +77,7 @@ from gemseo_tempo.problems.brachistochrone.model import GRAVITY
 from gemseo_tempo.problems.brachistochrone.model import REGISTRY
 from gemseo_tempo.problems.brachistochrone.model import TARGET
 from gemseo_tempo.problems.brachistochrone.model import drag_over_mass
+from gemseo_tempo.problems.brachistochrone.model import normal_over_mass
 from gemseo_tempo.problems.brachistochrone.model import variant_constants
 from gemseo_tempo.scenario.dynamic_scenario import DynamicScenario
 from gemseo_tempo.scenario.formulations import OptimalControl
@@ -79,7 +101,8 @@ def wire_rhs(zeta, s, u, theta):
     s
         The states ``x``, ``y``, ``v`` and ``elapsed``.
     u
-        The control ``gamma``, the angle of the wire.
+        The control ``gamma``, the angle of the wire, and its rate
+        ``gamma_rate`` with respect to ``zeta``.
     theta
         The constants ``g``, ``mu`` and ``drag_coefficient``.
 
@@ -90,10 +113,13 @@ def wire_rhs(zeta, s, u, theta):
     """
     angle = u["gamma"]
     speed = s["v"]
-    push = theta["g"] * (jnp.sin(angle) - theta["mu"] * jnp.cos(angle))
     started = zeta > 0.0
     # Both branches are evaluated, so each is kept finite where it is not
     # used, or its gradient would be a NaN multiplied by zero.
+    safe_zeta = jnp.where(started, zeta, 1.0)
+    turn_rate = jnp.where(started, speed * u["gamma_rate"] / (2.0 * safe_zeta), 0.0)
+    normal = normal_over_mass(speed, angle, turn_rate, theta["g"])
+    push = theta["g"] * jnp.sin(angle) - theta["mu"] * normal
     safe_speed = jnp.where(started, jnp.maximum(speed, _TINY), 1.0)
     safe_push = jnp.where(started, 1.0, jnp.maximum(push, _TINY))
     ratio = jnp.where(started, 2.0 * zeta / safe_speed, jnp.sqrt(2.0 / safe_push))
@@ -111,14 +137,16 @@ def create_wire_state_space() -> StateSpace:
     Returns
     -------
     StateSpace
-        The model, with states ``x``, ``y``, ``v`` and ``elapsed`` and the
-        wire angle ``gamma`` as its control.
+        The model, with states ``x``, ``y``, ``v`` and ``elapsed``, the
+        wire angle ``gamma`` as its control, and the angle's rate read for
+        the normal force.
     """
     return StateSpace(
         states=["x", "y", "v", "elapsed"],
         controls=["gamma"],
         parameters=["g", "mu", "drag_coefficient"],
         rhs=wire_rhs,
+        control_rates=["gamma"],
     )
 
 
@@ -158,7 +186,7 @@ def create_wire_scenario(
         state_space=create_wire_state_space(),
         integrator=integrator or DiffraxIntegrator(dt0=1.0 / 400, n_save=size + 1),
         controls=(
-            PiecewiseLinearControl(
+            CubicControl(
                 "gamma", nodes, default_params=jnp.linspace(1.5, 0.2, size + 1)
             ),
         ),
