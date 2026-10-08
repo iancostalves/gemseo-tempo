@@ -331,7 +331,7 @@ def _chain_modes_study(smoke: bool) -> dict:
     return study
 
 
-def _generate_differentiation(name: str, smoke: bool) -> None:
+def generate_differentiation(name: str, smoke: bool) -> None:
     """Run one problem's differentiation studies.
 
     Parameters

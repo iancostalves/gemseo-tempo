@@ -31,10 +31,17 @@ hand, the stored answers can drift from the code that would now produce
 them. ``tests/test_doc_data.py`` is the guard, checking the stored results
 against quantities cheap enough to recompute on every test run.
 
+The differentiation benchmarks, which time every way of computing each
+problem's Jacobian, run on their own with ``--differentiation``: even
+their smoke version takes minutes, and their timings belong to the machine
+that measured them, so regenerating the optimizations leaves them as they
+are.
+
 Usage::
 
-    python tools/generate_doc_results.py                 # everything
+    python tools/generate_doc_results.py                 # every optimization
     python tools/generate_doc_results.py --only sail     # one problem
+    python tools/generate_doc_results.py --differentiation  # the benchmarks
     python tools/generate_doc_results.py --smoke         # tiny, for tests
 """
 
@@ -48,6 +55,7 @@ from pathlib import Path
 from doc_results.albatross import generate_albatross
 from doc_results.brachistochrone import generate_brachistochrone
 from doc_results.common import set_data_path
+from doc_results.differentiation import generate_differentiation
 from doc_results.sail import generate_sail
 
 logging.disable(logging.CRITICAL)
@@ -72,6 +80,11 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--only", nargs="+", choices=PROBLEMS, default=list(PROBLEMS))
     parser.add_argument("--smoke", action="store_true")
+    parser.add_argument(
+        "--differentiation",
+        action="store_true",
+        help="run the differentiation benchmarks instead of the optimizations",
+    )
     parser.add_argument("--output", type=Path, default=None)
     arguments = parser.parse_args(argv)
 
@@ -85,7 +98,11 @@ def main(argv=None) -> int:
     }
     for problem in arguments.only:
         started = time.perf_counter()
-        generators[problem](smoke=arguments.smoke)
+        if arguments.differentiation:
+            print(f"{problem} differentiation")
+            generate_differentiation(problem, arguments.smoke)
+        else:
+            generators[problem](smoke=arguments.smoke)
         print(f"  ({time.perf_counter() - started:.0f} s)")
     return 0
 

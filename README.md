@@ -197,9 +197,20 @@ is committed so an ordinary build never re-solves anything. Regenerate it
 after a change that would move those numbers:
 
 ```bash
-python tools/generate_doc_results.py            # everything, ~1 h
+python tools/generate_doc_results.py            # every optimization, ~1 h
 python tools/generate_doc_results.py --only sail  # one problem
 python tools/generate_doc_results.py --smoke     # tiny, for the test suite
+```
+
+The differentiation benchmarks the problem pages quote, timing every way of
+computing each Jacobian, are left out of that run: they are slow, and their
+timings belong to the machine that measured them. Regenerate them on their
+own, for every problem or with `--only`, after a change to a problem's
+dynamics or to how it is differentiated:
+
+```bash
+python tools/generate_doc_results.py --differentiation
+python tools/generate_doc_results.py --differentiation --only sail
 ```
 
 The script is only the command line; each problem's studies live in
