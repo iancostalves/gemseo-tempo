@@ -202,6 +202,10 @@ python tools/generate_doc_results.py --only sail  # one problem
 python tools/generate_doc_results.py --smoke     # tiny, for the test suite
 ```
 
+The script is only the command line; each problem's studies live in
+`tools/doc_results/`, one module per problem, beside the helpers they share
+for solving, propagating uncertainty and differentiating.
+
 `tests/test_doc_data.py` guards against the stored numbers drifting away
 from what the code would now produce, without re-running the optimizations
 themselves on every test run.
