@@ -74,6 +74,7 @@ def generate_albatross(smoke: bool = False) -> None:
         size,
         cycle,
         gemseo_scenario,
+        smoke,
     )
 
     scenario, gemseo_scenario = create_codesign_optimization(size=size)
@@ -87,6 +88,7 @@ def generate_albatross(smoke: bool = False) -> None:
         size,
         codesign,
         gemseo_scenario,
+        smoke,
     )
     _write_json("albatross/dense_check.json", checks)
     _write_json(
@@ -234,6 +236,7 @@ def _generate_cycle_shapes(size: int, budget: int, smoke: bool) -> None:
                 size,
                 cycle,
                 gemseo_scenario,
+                smoke,
             ),
         }
 
@@ -379,7 +382,9 @@ DENSE_POINTS = 401
 """The save points of a re-simulated cycle, enough to draw it smoothly."""
 
 
-def _write_dense_cycle(name, builder, size, nodes, gemseo_scenario) -> dict:
+def _write_dense_cycle(
+    name, builder, size, nodes, gemseo_scenario, smoke: bool = False
+) -> dict:
     """Fly an optimal cycle's controls through an accurate integrator.
 
     Collocation solves for the states at its nodes and never integrates
@@ -403,6 +408,8 @@ def _write_dense_cycle(name, builder, size, nodes, gemseo_scenario) -> dict:
         The optimal trajectory at the collocation nodes.
     gemseo_scenario
         The executed GEMSEO scenario.
+    smoke
+        Whether the optimum is a smoke one, flown with fixed steps.
 
     Returns
     -------
@@ -415,11 +422,16 @@ def _write_dense_cycle(name, builder, size, nodes, gemseo_scenario) -> dict:
     from gemseo_tempo.transcriptions import SingleShooting
 
     optimum = gemseo_scenario.optimization_result.x_opt_as_dict
-    twin = builder(
-        transcription=SingleShooting(),
-        size=size,
-        integrator=DiffraxIntegrator(rtol=1e-10, atol=1e-10, n_save=DENSE_POINTS),
-    )
+    if smoke:
+        # Six segments are too few for the nodes to hold the cycle up: the
+        # smoke optimum, flown, dives below the height floor of the wind
+        # profile, and adaptive stepping runs out of steps at any tolerance
+        # on the kink there. A fixed step always gets through, which is all
+        # the smoke run asks of it.
+        integrator = DiffraxIntegrator(dt0=1e-3, n_save=DENSE_POINTS, max_steps=100_000)
+    else:
+        integrator = DiffraxIntegrator(rtol=1e-10, atol=1e-10, n_save=DENSE_POINTS)
+    twin = builder(transcription=SingleShooting(), size=size, integrator=integrator)
     inputs = dict(twin.problem.input_defaults)
     for key, value in optimum.items():
         if key in inputs:
