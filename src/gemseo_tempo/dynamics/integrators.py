@@ -67,6 +67,12 @@ FORWARD = "forward"
 REVERSE = "reverse"
 """The reverse-mode (vjp) differentiation method."""
 
+_RATE_NUDGE = 1e-12
+"""How far after a stage time a control's rate is read, relative to the time.
+
+Far above the rounding that can put a node time on either side of the node,
+far below any time scale a control varies on."""
+
 # Which differentiation modes each adjoint supports. The Direct adjoint
 # unrolls the solve, so both jvp and vjp apply; the RecursiveCheckpoint and
 # Backsolve adjoints define only a custom reverse rule, so forward-mode
@@ -350,13 +356,19 @@ class DiffraxIntegrator(AbstractIntegrator):
             for name in state_space.control_rates:
                 # The control is a differentiable function of time here, so
                 # its rate is the derivative of the same call the value came
-                # from, rather than a finite difference of it.
+                # from, rather than a finite difference of it. It is taken
+                # just after t: a piecewise-linear control's rate jumps at
+                # its nodes, a fixed step puts stages exactly on them, and a
+                # node time rounded one way when compiled and the other when
+                # not would read the slope of different intervals, giving
+                # the two programs different answers. Just after the node,
+                # both read the interval it starts, as an exact time does.
                 control = rate_sources[name]
                 values[state_space.rate_name(name)] = jax.grad(
                     lambda time, params, control=control: jnp.reshape(
                         control(time, params), ()
                     )
-                )(t, control_params[name])
+                )(t + _RATE_NUDGE * (1.0 + jnp.abs(t)), control_params[name])
             return values
 
         def rhs(t, y, args):
