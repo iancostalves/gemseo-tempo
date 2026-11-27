@@ -70,21 +70,10 @@ To depend on gemseo-tempo from another project, install it straight from the
 repository:
 
 ```bash
-pip install "gemseo-tempo @ git+ssh://git@github.com/iancostalves/gemseo-tempo"
+pip install "gemseo-tempo @ git+https://github.com/iancostalves/gemseo-tempo"
 ```
 
 Pin a commit while the API is unsettled, by appending `@<sha>` to the URL.
-
-The repository is private, so this needs your GitHub credentials. SSH is the
-simplest route. Over HTTPS —
-`git+https://github.com/iancostalves/gemseo-tempo` — a git credential helper
-supplies them instead.
-
-:::{warning}
-Do not embed a personal access token in the URL. It leaks into shell
-history, into `pip freeze` output and into CI logs. Use SSH, or a credential
-helper that keeps the token out of the URL.
-:::
 
 ## Version numbers
 

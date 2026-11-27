@@ -63,6 +63,7 @@ dev = [
 ]
 
 [project.urls]
+Documentation = "https://iancostalves.github.io/gemseo-tempo/"
 Source = "https://github.com/iancostalves/gemseo-tempo"
 Tracker = "https://github.com/iancostalves/gemseo-tempo/issues"
 

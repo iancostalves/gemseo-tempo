@@ -56,14 +56,10 @@ pip install -e ".[test,doc]"
 Or install it directly as a dependency, without a working copy:
 
 ```bash
-pip install "gemseo-tempo @ git+ssh://git@github.com/iancostalves/gemseo-tempo"
+pip install "gemseo-tempo @ git+https://github.com/iancostalves/gemseo-tempo"
 ```
 
-The repository is private, so this needs your GitHub credentials. SSH is the
-simplest route; over HTTPS
-(`git+https://github.com/iancostalves/gemseo-tempo`) a git credential helper
-will supply them. Do not put a token in the URL — it ends up in shell history
-and in build logs.
+Append `@<sha>` to the URL to pin a commit while the API is unsettled.
 
 Python 3.11 to 3.13.
 
@@ -170,6 +166,8 @@ gemseo_scenario.execute(algo_name="SLSQP", max_iter=200)
 ```
 
 ## Documentation
+
+The published documentation is at <https://iancostalves.github.io/gemseo-tempo/>.
 
 Build it locally with `nox -s docs-serve`, which serves a live-reloading
 preview on <http://127.0.0.1:8000>, or `nox -s docs` for a one-shot build
